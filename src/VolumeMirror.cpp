@@ -1,69 +1,91 @@
 // src/VolumeMirror.cpp
 
 #include "VolumeMirror.h"
-#include <iostream>
-#include <chrono>
-#include <thread>
-#include <cmath>
 
 // Constructor
-VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, float maxDbmVal, bool debugMode)
-    : channelIndex(channelIdx), channelType(type),
+VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, float maxDbmVal, VoicemeeterManager& manager, long voicemeeterType, bool playSound)
+     : channelIndex(channelIdx), channelType(type),
       minDbm(minDbmVal), maxDbm(maxDbmVal),
-      debug(debugMode),
+      debug(manager.GetDebugMode()),
+      voicemeeterManager(manager), 
       lastWindowsVolume(-1.0f), lastWindowsMute(false),
       lastVmVolume(-1.0f), lastVmMute(false),
       ignoreWindowsChange(false), ignoreVoicemeeterChange(false),
-      running(false)
+      running(false),
+      refCount(1),
+      vmrAPI(nullptr),
+      playSoundOnSync(playSound) 
 {
-    // Initialize COM
-    CoInitialize(NULL);
+    // Initialize VoicemeeterManager with voicemeeterType if not already initialized
+    if (!voicemeeterManager.Initialize(voicemeeterType)) {
+        endpointVolume->UnregisterControlChangeNotify(this);
+        endpointVolume->Release();
+        speakers->Release();
+        deviceEnumerator->Release();
+        CoUninitialize();
+        throw std::runtime_error("Failed to initialize Voicemeeter API.");
+    } 
 
-    // Initialize Windows Audio Components
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-                                  __uuidof(IMMDeviceEnumerator), (void**)&deviceEnumerator);
+    vmrAPI = &voicemeeterManager.GetAPI(); 
+    
+    // Initialize COM
+    HRESULT hr = CoInitialize(NULL);
     if (FAILED(hr))
     {
-        throw std::runtime_error("Failed to initialize MMDeviceEnumerator.");
+        throw std::runtime_error("Failed to initialize COM.");
+    }
+
+    // Initialize Windows Audio Components
+    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+                          __uuidof(IMMDeviceEnumerator), (void**)&deviceEnumerator);
+    if (FAILED(hr))
+    {
+        CoUninitialize();
+        throw std::runtime_error("Failed to create MMDeviceEnumerator.");
     }
 
     hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &speakers);
     if (FAILED(hr))
     {
+        deviceEnumerator->Release();
+        CoUninitialize();
         throw std::runtime_error("Failed to get default audio endpoint.");
     }
 
     hr = speakers->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, NULL, (void**)&endpointVolume);
     if (FAILED(hr))
     {
-        throw std::runtime_error("Failed to get AudioEndpointVolume.");
+        speakers->Release();
+        deviceEnumerator->Release();
+        CoUninitialize();
+        throw std::runtime_error("Failed to get IAudioEndpointVolume.");
     }
 
-    // Initialize Voicemeeter API
-    if (!vmrAPI.Initialize()) {
-        throw std::runtime_error("Failed to initialize Voicemeeter API.");
-    }
-
-    if (vmrAPI.Login() != 0 && vmrAPI.Login() != 1)
+    // Register for volume change notifications
+    hr = endpointVolume->RegisterControlChangeNotify(this);
+    if (FAILED(hr))
     {
-        throw std::runtime_error("Failed to connect to Voicemeeter.");
+        endpointVolume->Release();
+        speakers->Release();
+        deviceEnumerator->Release();
+        CoUninitialize();
+        throw std::runtime_error("Failed to register for volume change notifications.");
     }
 
-    // Initialize last known states
     float currentVolume = 0.0f;
     endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
-    lastWindowsVolume = currentVolume * 100.0f;
+    lastWindowsVolume = scalarToPercent(currentVolume);
 
-    BOOL isMuted = FALSE;
-    endpointVolume->GetMute(&isMuted);
-    lastWindowsMute = isMuted;
+    BOOL isMutedBOOL = FALSE;
+    endpointVolume->GetMute(&isMutedBOOL);
+    lastWindowsMute = (isMutedBOOL != FALSE);
 
     // Initialize Voicemeeter channel states based on type
     if (channelType == ChannelType::Output)
     {
         // For Bus
         float gain = 0.0f;
-        if (vmrAPI.GetParameterFloat("Bus[0].Gain", &gain) == 0) {
+        if (vmrAPI->GetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Gain").c_str(), &gain) == 0) {
             lastVmVolume = dBmToPercent(gain);
         }
         else {
@@ -71,7 +93,7 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, fl
         }
 
         float muteVal = 0.0f;
-        if (vmrAPI.GetParameterFloat("Bus[0].Mute", &muteVal) == 0) {
+        if (vmrAPI->GetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Mute").c_str(), &muteVal) == 0) {
             lastVmMute = (muteVal != 0.0f);
         }
         else {
@@ -86,7 +108,7 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, fl
     {
         // For Strip
         float gain = 0.0f;
-        if (vmrAPI.GetParameterFloat("Strip[0].Gain", &gain) == 0) {
+        if (vmrAPI->GetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Gain").c_str(), &gain) == 0) {
             lastVmVolume = dBmToPercent(gain);
         }
         else {
@@ -94,7 +116,7 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, fl
         }
 
         float muteVal = 0.0f;
-        if (vmrAPI.GetParameterFloat("Strip[0].Mute", &muteVal) == 0) {
+        if (vmrAPI->GetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Mute").c_str(), &muteVal) == 0) {
             lastVmMute = (muteVal != 0.0f);
         }
         else {
@@ -104,7 +126,7 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, fl
         Log("Initial Voicemeeter Input Strip " + std::to_string(channelIndex) + " Volume: " +
             std::to_string(lastVmVolume.load()) + "% " +
             (lastVmMute.load() ? "(Muted)" : "(Unmuted)"));
-    }
+    } 
 
     Log("Initial Windows Volume: " + std::to_string(lastWindowsVolume.load()) + "% " +
         (lastWindowsMute.load() ? "(Muted)" : "(Unmuted)"));
@@ -113,88 +135,125 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, fl
 // Destructor
 VolumeMirror::~VolumeMirror()
 {
-    running = false;
-    if (vmThread.joinable())
-        vmThread.join();
+    Stop();
 
+    // Unregister for volume change notifications
     if (endpointVolume)
+    {
+        endpointVolume->UnregisterControlChangeNotify(this);
         endpointVolume->Release();
+    }
     if (speakers)
         speakers->Release();
     if (deviceEnumerator)
         deviceEnumerator->Release();
 
-    vmrAPI.Logout();
-    vmrAPI.Shutdown();
+    voicemeeterManager.Shutdown();
     CoUninitialize();
 }
 
+// Start the synchronization
 void VolumeMirror::Start()
 {
     running = true;
 
     // Start Voicemeeter monitoring thread
     vmThread = std::thread(&VolumeMirror::MonitorVoicemeeter, this);
-
-    // Start polling Windows volume in a separate thread
-    std::thread windowsThread(&VolumeMirror::PollWindowsVolume, this);
-    windowsThread.detach();
-
-    // Register callback for Windows volume changes
-    // Implemented via COM event subscription if needed
 }
 
-void VolumeMirror::PollWindowsVolume()
+// Stop the synchronization
+void VolumeMirror::Stop()
 {
-    while (running)
-    {
-        float currentVolume = 0.0f;
-        endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
-        currentVolume *= 100.0f;
-
-        BOOL isMuted = FALSE;
-        endpointVolume->GetMute(&isMuted);
-
-        if (fabs(currentVolume - lastWindowsVolume) > 1.0f || isMuted != lastWindowsMute)
-        {
-            if (!ignoreVoicemeeterChange)
-            {
-                float mappedVolume = percentToDbm(currentVolume);
-                ignoreWindowsChange = true;
-
-                if (channelType == ChannelType::Output)
-                {
-                    vmrAPI.SetParameterFloat("Bus[0].Gain", mappedVolume);
-                    vmrAPI.SetParameterFloat("Bus[0].Mute", isMuted ? 1.0f : 0.0f);
-                    Log("Windows Volume: " + std::to_string(currentVolume) + "% " +
-                        (isMuted ? "(Muted)" : "(Unmuted)") +
-                        " -> Voicemeeter Output Bus " + std::to_string(channelIndex) +
-                        " Volume: " + std::to_string(currentVolume) + "% " +
-                        (isMuted ? "(Muted)" : "(Unmuted)"));
-                }
-                else if (channelType == ChannelType::Input)
-                {
-                    vmrAPI.SetParameterFloat("Strip[0].Gain", mappedVolume);
-                    vmrAPI.SetParameterFloat("Strip[0].Mute", isMuted ? 1.0f : 0.0f);
-                    Log("Windows Volume: " + std::to_string(currentVolume) + "% " +
-                        (isMuted ? "(Muted)" : "(Unmuted)") +
-                        " -> Voicemeeter Input Strip " + std::to_string(channelIndex) +
-                        " Volume: " + std::to_string(currentVolume) + "% " +
-                        (isMuted ? "(Muted)" : "(Unmuted)"));
-                }
-
-                lastWindowsVolume = currentVolume;
-                lastWindowsMute = isMuted;
-            }
-            else
-            {
-                ignoreVoicemeeterChange = false;
-            }
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    running = false;
+    if (vmThread.joinable())
+        vmThread.join();
 }
+
+// IUnknown methods
+STDMETHODIMP_(ULONG) VolumeMirror::AddRef()
+{
+    return refCount.fetch_add(1) + 1;
+}
+
+STDMETHODIMP_(ULONG) VolumeMirror::Release()
+{
+    ULONG count = refCount.fetch_sub(1) - 1;
+    if (count == 0)
+    {
+        delete this;
+    }
+    return count;
+}
+
+STDMETHODIMP VolumeMirror::QueryInterface(REFIID riid, void **ppvInterface)
+{
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback))
+    {
+        *ppvInterface = this;
+        AddRef();
+        return S_OK;
+    }
+    *ppvInterface = nullptr;
+    return E_NOINTERFACE;
+}
+
+// IAudioEndpointVolumeCallback method
+STDMETHODIMP VolumeMirror::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify)
+{
+    if (!pNotify)
+        return E_POINTER;
+
+    std::lock_guard<std::mutex> lock(stateMutex);
+
+    float currentVolume = scalarToPercent(pNotify->fMasterVolume);
+    bool isMuted = (pNotify->bMuted != FALSE);
+
+    // Process Windows volume changes only if they are significant
+    if (fabs(currentVolume - lastWindowsVolume) > 1.0f || isMuted != lastWindowsMute)
+    {
+        if (!ignoreWindowsChange)
+        {
+            float mappedVolume = percentToDbm(currentVolume);
+            ignoreVoicemeeterChange = true; // Prevent recursion in Voicemeeter
+
+            HRESULT hr;
+            if (channelType == ChannelType::Output)
+            {
+                hr = vmrAPI->SetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Gain").c_str(), mappedVolume);
+                if (FAILED(hr)) {
+                    Log("Failed to set Voicemeeter Bus Gain.");
+                }
+                hr = vmrAPI->SetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Mute").c_str(), isMuted ? 1.0f : 0.0f);
+                if (FAILED(hr)) {
+                    Log("Failed to set Voicemeeter Bus Mute.");
+                }
+            }
+            else if (channelType == ChannelType::Input)
+            {
+                hr = vmrAPI->SetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Gain").c_str(), mappedVolume);
+                if (FAILED(hr)) {
+                    Log("Failed to set Voicemeeter Strip Gain.");
+                }
+                hr = vmrAPI->SetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Mute").c_str(), isMuted ? 1.0f : 0.0f);
+                if (FAILED(hr)) {
+                    Log("Failed to set Voicemeeter Strip Mute.");
+                }
+            }
+
+            lastWindowsVolume = currentVolume;
+            lastWindowsMute = isMuted;
+        }
+        else
+        {
+            ignoreWindowsChange = false;
+        }
+    }
+
+    return S_OK;
+}
+
+
+
 
 void VolumeMirror::MonitorVoicemeeter()
 {
@@ -202,70 +261,71 @@ void VolumeMirror::MonitorVoicemeeter()
     {
         try
         {
-            // Check if parameters have changed
-            if (vmrAPI.IsParametersDirty() > 0)
+            if (vmrAPI->IsParametersDirty() > 0)
             {
+                std::lock_guard<std::mutex> lock(stateMutex);
+
                 float vmGain = 0.0f;
                 bool vmMute = false;
 
                 if (channelType == ChannelType::Output)
                 {
-                    if (vmrAPI.GetParameterFloat("Bus[0].Gain", &vmGain) != 0)
-                        vmGain = 0.0f;
+                    if (vmrAPI->GetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Gain").c_str(), &vmGain) != 0)
+                        vmGain = minDbm;
 
                     float muteVal = 0.0f;
-                    if (vmrAPI.GetParameterFloat("Bus[0].Mute", &muteVal) == 0) {
+                    if (vmrAPI->GetParameterFloat(("Bus[" + std::to_string(channelIndex) + "].Mute").c_str(), &muteVal) == 0) {
                         vmMute = (muteVal != 0.0f);
                     }
                 }
                 else if (channelType == ChannelType::Input)
                 {
-                    if (vmrAPI.GetParameterFloat("Strip[0].Gain", &vmGain) != 0)
-                        vmGain = 0.0f;
+                    if (vmrAPI->GetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Gain").c_str(), &vmGain) != 0)
+                        vmGain = minDbm;
 
                     float muteVal = 0.0f;
-                    if (vmrAPI.GetParameterFloat("Strip[0].Mute", &muteVal) == 0) {
+                    if (vmrAPI->GetParameterFloat(("Strip[" + std::to_string(channelIndex) + "].Mute").c_str(), &muteVal) == 0) {
                         vmMute = (muteVal != 0.0f);
                     }
                 }
 
                 float mappedVmVolume = dBmToPercent(vmGain);
 
-                if (ignoreWindowsChange)
+                if (!ignoreVoicemeeterChange && (fabs(mappedVmVolume - lastVmVolume) > 1.0f || vmMute != lastVmMute))
                 {
-                    ignoreWindowsChange = false;
-                }
-                else if (fabs(mappedVmVolume - lastVmVolume) > 1.0f || vmMute != lastVmMute)
-                {
-                    // Update Windows volume
-                    ignoreVoicemeeterChange = true;
-                    float volumeScalar = percentToDbm(mappedVmVolume) / 100.0f;
-                    endpointVolume->SetMasterVolumeLevelScalar(volumeScalar, NULL);
-                    endpointVolume->SetMute(vmMute, NULL);
+                    ignoreWindowsChange = true; // Prevent recursion in Windows volume updates
 
-                    if (channelType == ChannelType::Output)
+                    float volumeScalar = percentToScalar(mappedVmVolume);
+                    HRESULT hr = endpointVolume->SetMasterVolumeLevelScalar(volumeScalar, NULL);
+                    if (FAILED(hr))
                     {
-                        Log("Voicemeeter Output Bus " + std::to_string(channelIndex) +
-                            " Volume: " + std::to_string(mappedVmVolume) + "% " +
-                            (vmMute ? "(Muted)" : "(Unmuted)") +
-                            " -> Windows Volume: " + std::to_string(mappedVmVolume) + "% " +
-                            (vmMute ? "(Muted)" : "(Unmuted)"));
+                        Log("Failed to set Windows volume.");
                     }
-                    else if (channelType == ChannelType::Input)
+                    hr = endpointVolume->SetMute(vmMute, NULL);
+                    if (FAILED(hr))
                     {
-                        Log("Voicemeeter Input Strip " + std::to_string(channelIndex) +
-                            " Volume: " + std::to_string(mappedVmVolume) + "% " +
-                            (vmMute ? "(Muted)" : "(Unmuted)") +
-                            " -> Windows Volume: " + std::to_string(mappedVmVolume) + "% " +
-                            (vmMute ? "(Muted)" : "(Unmuted)"));
+                        Log("Failed to set Windows mute state.");
                     }
+
+                    lastChangeTime = std::chrono::steady_clock::now();
+                    playSoundOnSync = true;
 
                     lastVmVolume = mappedVmVolume;
                     lastVmMute = vmMute;
                 }
+                else
+                {
+                    ignoreVoicemeeterChange = false;
+                }
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (playSoundOnSync && (std::chrono::steady_clock::now() - lastChangeTime > std::chrono::milliseconds(200)))
+            {
+                PlaySound(TEXT("C:/Windows/Media/Windows Unlock.wav"), NULL, SND_FILENAME | SND_ASYNC);
+                playSoundOnSync = false;
+            }
+
+            //std::this_thread::sleep_for(std::chrono::milliseconds(200));
         }
         catch (const std::exception& ex)
         {
@@ -274,6 +334,9 @@ void VolumeMirror::MonitorVoicemeeter()
     }
 }
 
+
+
+// dBmToPercent method
 float VolumeMirror::dBmToPercent(float dbm)
 {
     if (dbm < minDbm)
@@ -283,11 +346,33 @@ float VolumeMirror::dBmToPercent(float dbm)
     return ((dbm - minDbm) / (maxDbm - minDbm)) * 100.0f;
 }
 
+// percentToScalar method
+float VolumeMirror::percentToScalar(float percent)
+{
+    if (percent < 0.0f)
+        percent = 0.0f;
+    if (percent > 100.0f)
+        percent = 100.0f;
+    return percent / 100.0f;
+}
+
+// scalarToPercent method
+float VolumeMirror::scalarToPercent(float scalar)
+{
+    if (scalar < 0.0f)
+        scalar = 0.0f;
+    if (scalar > 1.0f)
+        scalar = 1.0f;
+    return scalar * 100.0f;
+}
+
+// percentToDbm method
 float VolumeMirror::percentToDbm(float percent)
 {
     return (percent / 100.0f) * (maxDbm - minDbm) + minDbm;
 }
 
+// Logging method
 void VolumeMirror::Log(const std::string& message)
 {
     if (debug)

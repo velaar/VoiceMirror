@@ -2,6 +2,7 @@
 
 #include "VoicemeeterAPI.h"
 #include <iostream>
+#include <string>
 
 // Constructor
 VoicemeeterAPI::VoicemeeterAPI() {}
@@ -22,8 +23,11 @@ bool VoicemeeterAPI::Initialize() {
     // Load the DLL
     hVoicemeeter = LoadLibraryA(dllName);
     if (!hVoicemeeter) {
-        std::cerr << "Failed to load " << dllName << std::endl;
+        std::cerr << "Failed to load " << dllName << ". Ensure it is in the executable directory or in the system PATH." << std::endl;
         return false;
+    }
+    else {
+        std::cout << "Successfully loaded " << dllName << std::endl;
     }
 
     // Retrieve function pointers
@@ -84,6 +88,7 @@ bool VoicemeeterAPI::Initialize() {
         return false;
     }
 
+    std::cout << "All Voicemeeter API functions loaded successfully." << std::endl;
     return true;
 }
 
@@ -92,26 +97,34 @@ void VoicemeeterAPI::Shutdown() {
         VBVMR_Logout();
         FreeLibrary(hVoicemeeter);
         hVoicemeeter = NULL;
+        std::cout << "Voicemeeter API shutdown and DLL unloaded." << std::endl;
     }
 }
 
 long VoicemeeterAPI::Login() {
     if (VBVMR_Login) {
-        return VBVMR_Login();
+        long result = VBVMR_Login();
+        std::cout << "Voicemeeter Login result: " << result << " RES: "  << (MB_APPLMODAL | MB_OK | MB_ICONERROR) << std::endl;
+
+        return result;
     }
     return -1;
 }
 
 long VoicemeeterAPI::Logout() {
     if (VBVMR_Logout) {
-        return VBVMR_Logout();
+        long result = VBVMR_Logout();
+        std::cout << "Voicemeeter Logout result: " << result << std::endl;
+        return result;
     }
     return -1;
 }
 
 long VoicemeeterAPI::RunVoicemeeter(long vType) {
     if (VBVMR_RunVoicemeeter) {
-        return VBVMR_RunVoicemeeter(vType);
+        long result = VBVMR_RunVoicemeeter(vType);
+        std::cout << "RunVoicemeeter(" << vType << ") result: " << result << std::endl;
+        return result;
     }
     return -1;
 }

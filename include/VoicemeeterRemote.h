@@ -1,5 +1,5 @@
 /******************************************************************************/
-/* Voicemeeter Remote API.                                  V.Burel©2015-2023 */
+/* Voicemeeter Remote API.                                  V.Burelï¿½2015-2023 */
 /******************************************************************************/
 /* This Library allows communication with Voicemeeter applications            */
 /* 4 Client Applications can be connected to remote Voicemeeter.              */
