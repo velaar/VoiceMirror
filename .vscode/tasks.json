@@ -1,0 +1,64 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run vcvarsall.bat",
+            "type": "shell",
+            "command": "U:\\Code\\MSToolkit\\VC\\Auxiliary\\Build\\vcvarsall.bat",
+            "args": ["x64"],
+            "problemMatcher": [],
+            "detail": "Sets up environment for x64 build configuration."
+        },
+        {
+            "label": "Set Low Priority",
+            "type": "shell",
+            "command": "start /low cmd /c VoiceMirror.exe",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": [],
+            "detail": "Runs the executable with low priority."
+        },
+        {
+            "label": "CMake Configure Debug",
+            "type": "shell",
+            "command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug",
+            "group": "build",
+            "dependsOn": "Run vcvarsall.bat",
+            "problemMatcher": [],
+            "detail": "Configures the CMake project for Debug configuration."
+        },
+        {
+            "label": "CMake Configure Release",
+            "type": "shell",
+            "command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release",
+            "group": "build",
+            "dependsOn": "Run vcvarsall.bat",
+            "problemMatcher": [],
+            "detail": "Configures the CMake project for Release configuration."
+        },
+        {
+            "label": "CMake Build Debug",
+            "type": "shell",
+            "command": "cmake --build build --config Debug",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "problemMatcher": ["$msCompile"],
+            "detail": "Builds the CMake project in Debug configuration."
+        },
+        {
+            "label": "CMake Build Release",
+            "type": "shell",
+            "command": "cmake --build build --config Release",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$msCompile"],
+            "detail": "Builds the CMake project in Release configuration."
+        }
+    ]
+}
