@@ -127,7 +127,20 @@ bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::stri
     std::string line;
     while (std::getline(configFile, line))
     {
-        if (line.empty() || line[0] == '#')
+        // Find the position of the first '#' character
+        size_t commentPos = line.find('#');
+        if (commentPos != std::string::npos)
+        {
+            // Remove the comment part
+            line = line.substr(0, commentPos);
+        }
+
+        // Trim leading and trailing whitespace
+        line.erase(0, line.find_first_not_of(" \t\r\n"));
+        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+
+        // Skip empty lines after removing comments
+        if (line.empty())
             continue;
 
         std::istringstream iss(line);
@@ -135,7 +148,7 @@ bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::stri
 
         if (std::getline(iss, key, '=') && std::getline(iss, value))
         {
-            // Trim whitespace
+            // Trim whitespace from key and value
             key.erase(0, key.find_first_not_of(" \t\r\n"));
             key.erase(key.find_last_not_of(" \t\r\n") + 1);
             value.erase(0, value.find_first_not_of(" \t\r\n"));

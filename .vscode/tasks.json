@@ -2,61 +2,69 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "CMake Configure",
+            "label": "Clean, Configure, and Build All",
             "type": "shell",
-            "command": "cmake",
+            "command": "powershell",
             "args": [
-                "-G", "Visual Studio 16 2019", // Adjust generator as per your Visual Studio version
-                "-A", "x64",
-                "-S", ".",
-                "-B", "build"
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "& {",
+                "    # Define build directories",
+                "    $buildDirs = @(",
+                "        'build\\win-release-x64',",
+                "        'build\\win-debug-x64',",
+                "        'build\\win-release-x86',",
+                "        'build\\win-debug-x86'",
+                "    );",
+                "",
+                "    # Remove each build directory if it exists",
+                "    foreach ($dir in $buildDirs) {",
+                "        if (Test-Path $dir) {",
+                "            Remove-Item -Recurse -Force $dir",
+                "            Write-Host \"Removed directory: $dir\"",
+                "        } else {",
+                "            Write-Host \"Directory does not exist, skipping: $dir\"",
+                "        }",
+                "    }",
+                "",
+                "    # Define presets",
+                "    $presets = @(",
+                "        'win-release-x64',",
+                "        'win-debug-x64',",
+                "        'win-release-x86',",
+                "        'win-debug-x86'",
+                "    );",
+                "",
+                "    # Configure and build each preset",
+                "    foreach ($preset in $presets) {",
+                "        Write-Host \"Configuring preset: $preset\"",
+                "        cmake --preset $preset",
+                "        if ($LASTEXITCODE -ne 0) {",
+                "            Write-Host \"Configuration failed for preset: $preset\" -ForegroundColor Red",
+                "            exit $LASTEXITCODE",
+                "        }",
+                "",
+                "        Write-Host \"Building preset: $preset\"",
+                "        cmake --build --preset $preset",
+                "        if ($LASTEXITCODE -ne 0) {",
+                "            Write-Host \"Build failed for preset: $preset\" -ForegroundColor Red",
+                "            exit $LASTEXITCODE",
+                "        }",
+                "    }",
+                "",
+                "    Write-Host \"All configurations built successfully.\" -ForegroundColor Green",
+                "}"
             ],
             "group": "build",
-            "dependsOn": "Run vcvarsall.bat",
-            "problemMatcher": [],
-            "detail": "Configures the CMake project."
-        },
-        {
-            "label": "CMake Build Debug",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build", "build",
-                "--config", "Debug"
-            ],
-            "problemMatcher": ["$msCompile"],
-            "detail": "Builds the Debug configuration."
-        },
-        {
-            "label": "CMake Build Release",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build", "build",
-                "--config", "Release"
-            ],
-            "problemMatcher": ["$msCompile"],
-            "detail": "Builds the Release configuration."
-        },
-        {
-            "label": "CMake Rebuild All",
-            "type": "shell",
-            "command": "cmake",
-            "args": [
-                "--build", "build",
-                "--config", "Debug",
-                "--target", "clean"
-            ],
-            "dependsOn": [
-                "CMake Clean Debug",
-                "CMake Build Debug",
-                "CMake Clean Release",
-                "CMake Build Release"
-            ],
-            "dependsOrder": "sequence",
-            "problemMatcher": [],
-            "detail": "Cleans and builds both Debug and Release configurations."
-        },
-        // Add other tasks as needed
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "showReuseMessage": true,
+                "clear": false
+            },
+            "problemMatcher": []
+        }
     ]
 }

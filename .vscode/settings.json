@@ -1,5 +1,4 @@
 {   
-    "cmake.generator": "Ninja",
     "cmake.sourceDirectory": "${workspaceFolder}",
     "cmake.buildDirectory": "${workspaceFolder}/build",
     "files.associations": {
@@ -71,6 +70,8 @@
         "xtree": "cpp",
         "xutility": "cpp",
         "mutex": "cpp",
-        "fstream": "cpp"
+        "fstream": "cpp",
+        "codecvt": "cpp",
+        "filesystem": "cpp"
     },
 }

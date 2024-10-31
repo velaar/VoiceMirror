@@ -28,6 +28,8 @@ bool VoicemeeterManager::Initialize(int voicemeeterType)
         return true;
     }
 
+    Logger::Instance().Log(LogLevel::DEBUG, "Initializing Voicemeeter Manager...");
+
     if (!vmrAPI.Initialize())
     {
         Logger::Instance().Log(LogLevel::ERR, "Failed to initialize Voicemeeter API.");
@@ -35,15 +37,49 @@ bool VoicemeeterManager::Initialize(int voicemeeterType)
     }
 
     long loginResult = vmrAPI.Login();
+    Logger::Instance().Log(LogLevel::DEBUG, "Voicemeeter login result: " + std::to_string(loginResult));
     loggedIn = (loginResult == 0 || loginResult == 1);
 
-    if (!loggedIn)
+    long vmType = 0;
+    if (loggedIn)
     {
-        Logger::Instance().Log(LogLevel::WARNING, "Voicemeeter login failed, attempting to run Voicemeeter.");
-        vmrAPI.RunVoicemeeter(voicemeeterType);
+        HRESULT hr = vmrAPI.GetVoicemeeterType(&vmType);
+        Logger::Instance().Log(LogLevel::DEBUG, "GetVoicemeeterType result: " + std::to_string(hr) + ", Type: " + std::to_string(vmType));
+        if (hr != 0)
+        {
+            Logger::Instance().Log(LogLevel::WARNING, "Voicemeeter is not running. Attempting to start it.");
+            loggedIn = false;
+        }
+    }
+
+      if (!loggedIn)
+    {
+        Logger::Instance().Log(LogLevel::WARNING, "Voicemeeter login failed, attempting to run Voicemeeter Type:" + std::to_string(voicemeeterType));
+        long runResult = vmrAPI.RunVoicemeeter(voicemeeterType);
+        Logger::Instance().Log(LogLevel::DEBUG, "RunVoicemeeter result: " + std::to_string(runResult));
+
+        if (runResult != 0)
+        {
+            Logger::Instance().Log(LogLevel::ERR, "Failed to run Voicemeeter. Error code: " + std::to_string(runResult));
+            return false;
+        }
+
         std::this_thread::sleep_for(std::chrono::seconds(3));
         loginResult = vmrAPI.Login();
-        loggedIn = (loginResult == 0 || loginResult == 1);
+        Logger::Instance().Log(LogLevel::DEBUG, "Voicemeeter login result after running: " + std::to_string(loginResult));
+        loggedIn = (loginResult == -2 || loginResult == 0);
+
+        // Check again if Voicemeeter is running
+        if (loggedIn)
+        {
+            HRESULT hr = vmrAPI.GetVoicemeeterType(&vmType);
+            Logger::Instance().Log(LogLevel::DEBUG, "GetVoicemeeterType result after running: " + std::to_string(hr) + ", Type: " + std::to_string(vmType));
+            if (hr != 0)
+            {
+                Logger::Instance().Log(LogLevel::ERR, "Failed to start Voicemeeter.");
+                loggedIn = false;
+            }
+        }
     }
 
     if (loggedIn)
@@ -136,7 +172,7 @@ bool VoicemeeterManager::GetDebugMode()
  *
  * @return Reference to VoicemeeterAPI.
  */
-VoicemeeterAPI& VoicemeeterManager::GetAPI()
+VoicemeeterAPI &VoicemeeterManager::GetAPI()
 {
     return vmrAPI;
 }
@@ -186,7 +222,7 @@ void VoicemeeterManager::ListAllChannels()
     Logger::Instance().Log(LogLevel::INFO, "Voicemeeter Type: " + typeStr);
 
     // Lambda to print channel parameters
-    auto PrintParameter = [&](const std::string& param, const std::string& type, int index)
+    auto PrintParameter = [&](const std::string &param, const std::string &type, int index)
     {
         char label[512] = {0};
         long result = vmrAPI.GetParameterStringA(param.c_str(), label);
@@ -256,7 +292,7 @@ void VoicemeeterManager::ListInputs()
             }
         }
     }
-    catch (const std::exception& ex)
+    catch (const std::exception &ex)
     {
         Logger::Instance().Log(LogLevel::ERR, "Error listing Voicemeeter inputs: " + std::string(ex.what()));
     }
@@ -290,7 +326,7 @@ void VoicemeeterManager::ListOutputs()
             }
         }
     }
-    catch (const std::exception& ex)
+    catch (const std::exception &ex)
     {
         Logger::Instance().Log(LogLevel::ERR, "Error listing Voicemeeter outputs: " + std::string(ex.what()));
     }

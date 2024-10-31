@@ -88,6 +88,7 @@ public:
      * @param interval Polling interval in milliseconds.
      */
     void SetPollingMode(bool enabled, int interval);
+    GUID eventContextGuid;
 
 
 private:
@@ -207,6 +208,12 @@ private:
     // Callback Control
     bool playSoundOnSync;
 
+    std::chrono::steady_clock::time_point lastSoundPlayTime;
+    std::chrono::milliseconds soundCooldownDuration;
+    std::chrono::milliseconds debounceDuration;
+
+    std::mutex soundMutex;
+
     // Mutexes for Thread Safety
     std::mutex vmMutex;        // Protects volume synchronization
     std::mutex controlMutex;   // Protects start/stop control
@@ -217,6 +224,9 @@ private:
     // Polling settings
     bool pollingEnabled;
     int pollingInterval;
+
+
+
 };
 
 #endif // VOLUMEMIRROR_H

@@ -105,7 +105,7 @@ void Logger::Log(LogLevel level, const std::string &message)
         levelStr = "<DEBUG> ";
         break;
     case LogLevel::INFO:
-        levelStr = "<INFO > ";
+        levelStr = "<INFO> ";
         break;
     case LogLevel::WARNING:
         levelStr = "<WARNING> ";

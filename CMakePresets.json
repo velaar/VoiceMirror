@@ -7,92 +7,90 @@
   },
   "configurePresets": [
     {
-      "name": "Release",
+      "name": "win-release-x64",
       "displayName": "Release (64-bit)",
-      "description": "Configure the project with maximum optimization settings for MSVC (64-bit)",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/Release",
+      "description": "Configure the project for Release build (64-bit) with maximum optimizations.",
+      "binaryDir": "${sourceDir}/build/win-release-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:INTEL64 /arch:AVX2",
-        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/LTCG",
         "CMAKE_CXX_STANDARD": "17",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/Release/bin",
-        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/Release/lib",
-        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/Release/lib"
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/bin",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/lib",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/lib",
+        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:INTEL64 /arch:AVX2 /Ob2",
+        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/LTCG"
       }
     },
     {
-      "name": "Release-x86",
-      "displayName": "Release (32-bit)",
-      "description": "Configure the project with maximum optimization settings for MSVC (32-bit)",
-      "architecture": "Win32",
-      "binaryDir": "${sourceDir}/build/Release-x86",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:ATOM",
-        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/LTCG",
-        "CMAKE_CXX_STANDARD": "17",
-        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
-        "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/Release-x86/bin",
-        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/Release-x86/lib",
-        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/Release-x86/lib"
-      }
-    },
-    {
-      "name": "Debug",
+      "name": "win-debug-x64",
       "displayName": "Debug (64-bit)",
-      "description": "Configure the project with Debug settings for MSVC (64-bit)",
-      "architecture": "x64",
-      "binaryDir": "${sourceDir}/build/Debug",
+      "description": "Configure the project for Debug build (64-bit).",
+      "binaryDir": "${sourceDir}/build/win-debug-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Od /RTC1",
         "CMAKE_CXX_STANDARD": "17",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug/bin",
-        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug/lib",
-        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug/lib"
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x64/bin",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x64/lib",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x64/lib",
+        "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Od /RTC1 /Ob0",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": ""
       }
     },
     {
-      "name": "Debug-x86",
-      "displayName": "Debug (32-bit)",
-      "description": "Configure the project with Debug settings for MSVC (32-bit)",
-      "architecture": "Win32",
-      "binaryDir": "${sourceDir}/build/Debug-x86",
+      "name": "win-release-x86",
+      "displayName": "Release (32-bit)",
+      "description": "Configure the project for Release build (32-bit) with maximum optimizations.",
+      "binaryDir": "${sourceDir}/build/win-release-x86",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Od /RTC1",
+        "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CXX_STANDARD": "17",
         "CMAKE_CXX_STANDARD_REQUIRED": "ON",
         "CMAKE_CXX_EXTENSIONS": "OFF",
-        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug-x86/bin",
-        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug-x86/lib",
-        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/Debug-x86/lib"
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x86/bin",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x86/lib",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x86/lib",
+        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:ATOM /Ob2",
+        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/LTCG"
+      }
+    },
+    {
+      "name": "win-debug-x86",
+      "displayName": "Debug (32-bit)",
+      "description": "Configure the project for Debug build (32-bit)",
+      "binaryDir": "${sourceDir}/build/win-debug-x86",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_STANDARD": "17",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF",
+        "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x86/bin",
+        "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x86/lib",
+        "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/win-debug-x86/lib",
+        "CMAKE_CXX_FLAGS_DEBUG": "/Zi /Od /RTC1 /Ob0",
+        "CMAKE_EXE_LINKER_FLAGS_DEBUG": ""
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "Release",
-      "configurePreset": "Release"
+      "name": "win-release-x64",
+      "configurePreset": "win-release-x64"
     },
     {
-      "name": "Release-x86",
-      "configurePreset": "Release-x86"
+      "name": "win-debug-x64",
+      "configurePreset": "win-debug-x64"
     },
     {
-      "name": "Debug",
-      "configurePreset": "Debug"
+      "name": "win-release-x86",
+      "configurePreset": "win-release-x86"
     },
     {
-      "name": "Debug-x86",
-      "configurePreset": "Debug-x86"
+      "name": "win-debug-x86",
+      "configurePreset": "win-debug-x86"
     }
   ],
   "testPresets": []
