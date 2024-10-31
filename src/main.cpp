@@ -474,7 +474,7 @@ int main(int argc, char *argv[]) {
 
     // Handle version
     if (config.version) {
-        Logger::Instance().Log(LogLevel::INFO, "VoiceMirror Version 0.1.10-pre-alpha");
+        Logger::Instance().Log(LogLevel::INFO, "VoiceMirror Version 0.2.0-alpha");
         return 0;
     }
 
