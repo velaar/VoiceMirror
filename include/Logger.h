@@ -1,0 +1,72 @@
+#ifndef LOGGER_H
+#define LOGGER_H
+
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <mutex>
+#include <chrono>
+#include <iomanip>
+#include <ctime>
+
+/**
+ * @brief Enumeration for log levels.
+ */
+enum class LogLevel
+{
+    DEBUG,   ///< Debug level for detailed internal information.
+    INFO,    ///< Informational messages that highlight the progress.
+    WARNING, ///< Potentially harmful situations.
+    ERR    ///< Error events that might still allow the application to continue.
+};
+
+/**
+ * @brief Logger class to handle logging with different levels.
+ *
+ * The Logger class is implemented as a singleton to ensure consistent logging across the application.
+ */
+class Logger
+{
+public:
+    /**
+     * @brief Get the singleton instance of the Logger.
+     * @return Reference to the Logger instance.
+     */
+    static Logger &Instance();
+
+    /**
+     * @brief Set the log level.
+     * @param level The desired log level.
+     */
+    void SetLogLevel(LogLevel level);
+
+    /**
+     * @brief Enable logging to a file.
+     * @param filePath Path to the log file.
+     */
+    void EnableFileLogging(const std::string &filePath);
+
+    /**
+     * @brief Disable file logging.
+     */
+    void DisableFileLogging();
+
+    /**
+     * @brief Log a message with the specified log level.
+     * @param level The log level of the message.
+     * @param message The message to log.
+     */
+    void Log(LogLevel level, const std::string &message);
+
+private:
+    // Private constructor and destructor for singleton pattern
+    Logger();
+    ~Logger();
+
+    LogLevel logLevel;       ///< Current log level.
+    std::ofstream logFile;   ///< Output file stream for logging to a file.
+    std::mutex logMutex;     ///< Mutex to protect concurrent access to logging.
+    bool fileLoggingEnabled; ///< Flag indicating if file logging is enabled.
+};
+
+#endif // LOGGER_H

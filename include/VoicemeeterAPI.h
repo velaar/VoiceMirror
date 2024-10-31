@@ -1,57 +1,43 @@
-// include/VoicemeeterAPI.h
-
-#ifndef VOICEMETER_API_H
-#define VOICEMETER_API_H
+#ifndef VOICEMEETERAPI_H
+#define VOICEMEETERAPI_H
 
 #include <windows.h>
-#include "VoicemeeterRemote.h" // Ensure VoicemeeterRemote.h is placed appropriately
+#include "VoicemeeterRemote.h" // Ensure VoicemeeterRemote.h is included
 
-// Function pointer typedefs as defined in VoicemeeterRemote.h
-typedef long (__stdcall *T_VBVMR_Login)(void);
-typedef long (__stdcall *T_VBVMR_Logout)(void);
-typedef long (__stdcall *T_VBVMR_RunVoicemeeter)(long vType);
-
-typedef long (__stdcall *T_VBVMR_GetVoicemeeterType)(long* pType);
-typedef long (__stdcall *T_VBVMR_GetVoicemeeterVersion)(long* pVersion);
-
-typedef long (__stdcall *T_VBVMR_IsParametersDirty)(void);
-typedef long (__stdcall *T_VBVMR_GetParameterFloat)(char* szParamName, float* pValue);
-typedef long (__stdcall *T_VBVMR_GetParameterStringA)(char* szParamName, char* szString);
-typedef long (__stdcall *T_VBVMR_GetParameterStringW)(char* szParamName, unsigned short* wszString);
-
-typedef long (__stdcall *T_VBVMR_GetLevel)(long nType, long nuChannel, float* pValue);
-typedef long (__stdcall *T_VBVMR_GetMidiMessage)(unsigned char* pMIDIBuffer, long nbByteMax);
-typedef long (__stdcall *T_VBVMR_SendMidiMessage)(unsigned char* pMIDIBuffer, long nbByteMax);
-
-typedef long (__stdcall *T_VBVMR_SetParameterFloat)(char* szParamName, float Value);
-typedef long (__stdcall *T_VBVMR_SetParameters)(char* szParamScript);
-typedef long (__stdcall *T_VBVMR_SetParametersW)(unsigned short* szParamScript);
-typedef long (__stdcall *T_VBVMR_SetParameterStringA)(char* szParamName, char* szString);
-typedef long (__stdcall *T_VBVMR_SetParameterStringW)(char* szParamName, unsigned short* wszString);
-
-typedef long (__stdcall *T_VBVMR_Output_GetDeviceNumber)(void);
-typedef long (__stdcall *T_VBVMR_Output_GetDeviceDescA)(long zindex, long* nType, char* szDeviceName, char* szHardwareId);
-typedef long (__stdcall *T_VBVMR_Output_GetDeviceDescW)(long zindex, long* nType, unsigned short* wszDeviceName, unsigned short* wszHardwareId);
-typedef long (__stdcall *T_VBVMR_Input_GetDeviceNumber)(void);
-typedef long (__stdcall *T_VBVMR_Input_GetDeviceDescA)(long zindex, long* nType, char* szDeviceName, char* szHardwareId);
-typedef long (__stdcall *T_VBVMR_Input_GetDeviceDescW)(long zindex, long* nType, unsigned short* wszDeviceName, unsigned short* wszHardwareId);
-
-typedef long (__stdcall *T_VBVMR_AudioCallbackRegister)(long mode, T_VBVMR_VBAUDIOCALLBACK pCallback, void* lpUser, char szClientName[64]);
-typedef long (__stdcall *T_VBVMR_AudioCallbackStart)(void);
-typedef long (__stdcall *T_VBVMR_AudioCallbackStop)(void);
-typedef long (__stdcall *T_VBVMR_AudioCallbackUnregister)(void);
-
-typedef long (__stdcall *T_VBVMR_MacroButton_IsDirty)(void);
-typedef long (__stdcall *T_VBVMR_MacroButton_GetStatus)(long nuLogicalButton, float* pValue, long bitmode);
-typedef long (__stdcall *T_VBVMR_MacroButton_SetStatus)(long nuLogicalButton, float fValue, long bitmode);
-
-// Voicemeeter API Wrapper Class
+/**
+ * @brief The VoicemeeterAPI class wraps the Voicemeeter Remote API functions.
+ *
+ * This class dynamically loads the Voicemeeter Remote DLL and provides methods to interact with Voicemeeter.
+ * It manages function pointers and ensures that all required API functions are available.
+ */
 class VoicemeeterAPI {
 public:
+    /**
+     * @brief Constructor for VoicemeeterAPI.
+     *
+     * Initializes the class but does not load the DLL.
+     */
     VoicemeeterAPI();
+
+    /**
+     * @brief Destructor for VoicemeeterAPI.
+     *
+     * Ensures that the Voicemeeter API is shut down and the DLL is unloaded.
+     */
     ~VoicemeeterAPI();
 
+    /**
+     * @brief Initializes the Voicemeeter API by loading the DLL and retrieving function pointers.
+     *
+     * Determines the correct DLL based on system architecture, loads it, and retrieves all necessary function pointers.
+     *
+     * @return True if initialization was successful, false otherwise.
+     */
     bool Initialize();
+
+    /**
+     * @brief Shuts down the Voicemeeter API and unloads the DLL.
+     */
     void Shutdown();
 
     // API Functions
@@ -93,8 +79,10 @@ public:
     long MacroButton_GetStatus(long nuLogicalButton, float* pValue, long bitmode);
     long MacroButton_SetStatus(long nuLogicalButton, float fValue, long bitmode);
 
+    long SetParametersCallback(void(__stdcall* callback)());
+
 private:
-    HMODULE hVoicemeeter = NULL;
+    HMODULE hVoicemeeter = NULL; ///< Handle to the loaded Voicemeeter DLL
 
     // Function pointers
     T_VBVMR_Login VBVMR_Login = NULL;
@@ -140,4 +128,4 @@ private:
     VoicemeeterAPI& operator=(const VoicemeeterAPI&) = delete;
 };
 
-#endif // VOICEMETER_API_H
+#endif // VOICEMEETERAPI_H

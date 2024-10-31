@@ -2,63 +2,61 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Run vcvarsall.bat",
+            "label": "CMake Configure",
             "type": "shell",
-            "command": "U:\\Code\\MSToolkit\\VC\\Auxiliary\\Build\\vcvarsall.bat",
-            "args": ["x64"],
-            "problemMatcher": [],
-            "detail": "Sets up environment for x64 build configuration."
-        },
-        {
-            "label": "Set Low Priority",
-            "type": "shell",
-            "command": "start /low cmd /c VoiceMirror.exe",
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            },
-            "problemMatcher": [],
-            "detail": "Runs the executable with low priority."
-        },
-        {
-            "label": "CMake Configure Debug",
-            "type": "shell",
-            "command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug",
+            "command": "cmake",
+            "args": [
+                "-G", "Visual Studio 16 2019", // Adjust generator as per your Visual Studio version
+                "-A", "x64",
+                "-S", ".",
+                "-B", "build"
+            ],
             "group": "build",
             "dependsOn": "Run vcvarsall.bat",
             "problemMatcher": [],
-            "detail": "Configures the CMake project for Debug configuration."
-        },
-        {
-            "label": "CMake Configure Release",
-            "type": "shell",
-            "command": "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release",
-            "group": "build",
-            "dependsOn": "Run vcvarsall.bat",
-            "problemMatcher": [],
-            "detail": "Configures the CMake project for Release configuration."
+            "detail": "Configures the CMake project."
         },
         {
             "label": "CMake Build Debug",
             "type": "shell",
-            "command": "cmake --build build --config Debug",
-            "group": {
-                "kind": "build",
-                "isDefault": false
-            },
+            "command": "cmake",
+            "args": [
+                "--build", "build",
+                "--config", "Debug"
+            ],
             "problemMatcher": ["$msCompile"],
-            "detail": "Builds the CMake project in Debug configuration."
+            "detail": "Builds the Debug configuration."
         },
         {
             "label": "CMake Build Release",
             "type": "shell",
-            "command": "cmake --build build --config Release",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
+            "command": "cmake",
+            "args": [
+                "--build", "build",
+                "--config", "Release"
+            ],
             "problemMatcher": ["$msCompile"],
-            "detail": "Builds the CMake project in Release configuration."
-        }
+            "detail": "Builds the Release configuration."
+        },
+        {
+            "label": "CMake Rebuild All",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "build",
+                "--config", "Debug",
+                "--target", "clean"
+            ],
+            "dependsOn": [
+                "CMake Clean Debug",
+                "CMake Build Debug",
+                "CMake Clean Release",
+                "CMake Build Release"
+            ],
+            "dependsOrder": "sequence",
+            "problemMatcher": [],
+            "detail": "Cleans and builds both Debug and Release configurations."
+        },
+        // Add other tasks as needed
     ]
 }

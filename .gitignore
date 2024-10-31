@@ -1,5 +1,5 @@
 build
-.vscode
+
 lib
 lib_voicemeeter
 vcpkg*

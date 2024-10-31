@@ -1,59 +1,73 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.8)
 project(VoiceMirror)
 
 # Set C++ standard to C++17
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Set output directories for executables
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+add_compile_options(/std:c++17)
+
+
+# Set C++ standard and required features
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Define all supported build configurations
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_CONFIGURATION_TYPES Debug Release MinSizeRel RelWithDebInfo CACHE STRING 
+        "Available build configurations" FORCE)
+    set_property(CACHE CMAKE_CONFIGURATION_TYPES PROPERTY STRINGS 
+        "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
+
+# Set output directories for all configurations
+set(OUTPUT_BASE ${CMAKE_BINARY_DIR})
+foreach(config Debug Release MinSizeRel RelWithDebInfo)
+    string(TOUPPER ${config} CONFIG_UPPER)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${OUTPUT_BASE}/bin/${config})
+    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${OUTPUT_BASE}/lib/${config})
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${CONFIG_UPPER} ${OUTPUT_BASE}/lib/${config})
+endforeach()
 
 # Organize source and header files explicitly
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 file(GLOB_RECURSE HEADERS "include/*.h" "include/*.hpp")
 
+# Set architecture to x86 (32-bit) if not already defined
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
+    set(CMAKE_GENERATOR_PLATFORM x86 CACHE STRING "Specify platform x86 for 32-bit compilation" FORCE)
+endif()
+
+
 # Add executable target
 add_executable(VoiceMirror ${SOURCES} ${HEADERS})
 
-# Target-based include directories
-target_include_directories(VoiceMirror PRIVATE ${CMAKE_SOURCE_DIR}/include)
+# Specify include directories
+target_include_directories(VoiceMirror PRIVATE "${CMAKE_SOURCE_DIR}/include")
 
-# Enable additional compiler warnings
-if(MSVC)
-    target_compile_options(VoiceMirror PRIVATE /W4 /WX)
-else()
-    target_compile_options(VoiceMirror PRIVATE -Wall -Wextra -Wpedantic -Werror)
+# Specify C++ standard and required features
+target_compile_features(VoiceMirror PRIVATE cxx_std_17)
+
+# Compiler options for each build configuration
+target_compile_options(VoiceMirror PRIVATE 
+    $<$<CONFIG:Debug>:/W3 /WX /RTC1 /Zi /Od>
+    $<$<CONFIG:Release>:/W3 /WX /O2 /Ob2 /Oi /Ot /GL /DNDEBUG>
+    $<$<CONFIG:MinSizeRel>:/W3 /WX /O1 /Ob1 /DNDEBUG>
+    $<$<CONFIG:RelWithDebInfo>:/W3 /WX /O2 /Ob2 /Zi /DNDEBUG>
+)
+
+# Link Windows-specific libraries, including Propsys
+target_link_libraries(VoiceMirror PRIVATE Ole32 winmm Propsys)
+
+# Enable position-independent code if needed
+# set_property(TARGET VoiceMirror PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# Define build types if not using a multi-config generator
+if(NOT CMAKE_CONFIGURATION_TYPES)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
-# Set optimization flags and debug information based on configuration
-if(MSVC)
-    # MSVC compiler settings
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /RTC1 /Zi /Od")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /Oi /Ot /GL /DNDEBUG")
-else()
-    # Non-MSVC settings for GCC/Clang
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g")
-    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -flto -DNDEBUG")
-endif()
-
-# Link Windows-specific libraries if on Windows
-if(WIN32)
-    target_link_libraries(VoiceMirror Ole32 winmm)
-endif()
-
-# Set CMake to allow for multiple configurations if supported by the generator
-if(CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Available build types" FORCE)
-else()
-    set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Choose build type: Debug, Release" FORCE)
-    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release")
-endif()
-
-# Output directories based on configuration
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib/Debug)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/lib/Debug)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_BINARY_DIR}/bin/Debug)
-
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib/Release)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/lib/Release)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_BINARY_DIR}/bin/Release)
