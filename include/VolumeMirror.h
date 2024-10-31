@@ -3,31 +3,29 @@
 #ifndef VOLUMEMIRROR_H
 #define VOLUMEMIRROR_H
 
-#include <windows.h>
-#include <mmdeviceapi.h>
-#include <endpointvolume.h>
 #include <audioclient.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
+#include <windows.h>
+#include <wrl/client.h>
+
 #include <atomic>
 #include <mutex>
 #include <string>
 #include <thread>
-#include <wrl/client.h>
+
 #include "VoicemeeterManager.h"
 
 // Forward declaration of the AUDIO_VOLUME_NOTIFICATION_DATA structure
 struct AUDIO_VOLUME_NOTIFICATION_DATA;
 
 // Enum to specify the type of channel
-enum class ChannelType
-{
-    Input,
-    Output
-};
+enum class ChannelType { Input,
+                         Output };
 
 // VolumeMirror Class Definition
-class VolumeMirror : public IAudioEndpointVolumeCallback
-{
-public:
+class VolumeMirror : public IAudioEndpointVolumeCallback {
+   public:
     /**
      * @brief Constructor for VolumeMirror.
      * @param channelIdx Index of the Voicemeeter channel to synchronize.
@@ -35,10 +33,11 @@ public:
      * @param minDbmVal Minimum dBm value for volume conversion.
      * @param maxDbmVal Maximum dBm value for volume conversion.
      * @param manager Reference to the VoicemeeterManager instance.
-     * @param playSound Flag to indicate whether to play a sound on synchronization.
+     * @param playSound Flag to indicate whether to play a sound on
+     * synchronization.
      */
-    VolumeMirror(int channelIdx, ChannelType type, float minDbmVal, float maxDbmVal,
-                 VoicemeeterManager& manager, bool playSound);
+    VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
+                 float maxDbmVal, VoicemeeterManager &manager, bool playSound);
 
     /**
      * @brief Destructor for VolumeMirror.
@@ -68,21 +67,23 @@ public:
      * @param ppvObject Pointer to the interface pointer.
      * @return HRESULT indicating success or failure.
      */
-    STDMETHODIMP QueryInterface(REFIID riid, void** ppvObject) override;
+    STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject) override;
 
     /**
      * @brief Implementation of IUnknown's AddRef method.
      * @return ULONG representing the new reference count.
      */
-    STDMETHODIMP_(ULONG) AddRef() override;
+    STDMETHODIMP_(ULONG)
+    AddRef() override;
 
     /**
      * @brief Implementation of IUnknown's Release method.
      * @return ULONG representing the new reference count.
      */
-    STDMETHODIMP_(ULONG) Release() override;
+    STDMETHODIMP_(ULONG)
+    Release() override;
 
-     /**
+    /**
      * @brief Sets the polling mode and interval.
      * @param enabled Whether polling is enabled.
      * @param interval Polling interval in milliseconds.
@@ -90,11 +91,10 @@ public:
     void SetPollingMode(bool enabled, int interval);
     GUID eventContextGuid;
 
-
-private:
+   private:
     // Prevent copying and assignment
-    VolumeMirror(const VolumeMirror&) = delete;
-    VolumeMirror& operator=(const VolumeMirror&) = delete;
+    VolumeMirror(const VolumeMirror &) = delete;
+    VolumeMirror &operator=(const VolumeMirror &) = delete;
 
     /**
      * @brief Initializes the Voicemeeter channel's initial state.
@@ -108,11 +108,12 @@ private:
 
     /**
      * @brief Retrieves the current Voicemeeter volume and mute state.
-     * @param volumePercent Reference to store the volume percentage (0.0f - 100.0f).
+     * @param volumePercent Reference to store the volume percentage (0.0f -
+     * 100.0f).
      * @param isMuted Reference to store the mute state (true if muted).
      * @return True if successful, false otherwise.
      */
-    bool GetVoicemeeterVolume(float& volumePercent, bool& isMuted);
+    bool GetVoicemeeterVolume(float &volumePercent, bool &isMuted);
 
     /**
      * @brief Updates Voicemeeter's volume and mute state based on Windows volume.
@@ -143,14 +144,16 @@ private:
     float percentToScalar(float percent);
 
     /**
-     * @brief Converts dBm gain value to percentage volume based on min and max dBm.
+     * @brief Converts dBm gain value to percentage volume based on min and max
+     * dBm.
      * @param dBm dBm gain value.
      * @return Volume as a percentage.
      */
     float dBmToPercent(float dBm);
 
     /**
-     * @brief Converts percentage volume (0.0f - 100.0f) to dBm gain value based on min and max dBm.
+     * @brief Converts percentage volume (0.0f - 100.0f) to dBm gain value based
+     * on min and max dBm.
      * @param percent Percentage volume value.
      * @return dBm gain value.
      */
@@ -181,8 +184,8 @@ private:
     float maxDbm;
 
     // Voicemeeter Manager and API
-    VoicemeeterManager& voicemeeterManager;
-    VoicemeeterAPI* vmrAPI;
+    VoicemeeterManager &voicemeeterManager;
+    VoicemeeterAPI *vmrAPI;
 
     // COM Interfaces using ComPtr for automatic management
     Microsoft::WRL::ComPtr<IMMDeviceEnumerator> deviceEnumerator;
@@ -215,8 +218,8 @@ private:
     std::mutex soundMutex;
 
     // Mutexes for Thread Safety
-    std::mutex vmMutex;        // Protects volume synchronization
-    std::mutex controlMutex;   // Protects start/stop control
+    std::mutex vmMutex;       // Protects volume synchronization
+    std::mutex controlMutex;  // Protects start/stop control
 
     // Monitoring Thread
     std::thread monitorThread;
@@ -224,9 +227,6 @@ private:
     // Polling settings
     bool pollingEnabled;
     int pollingInterval;
-
-
-
 };
 
-#endif // VOLUMEMIRROR_H
+#endif  // VOLUMEMIRROR_H

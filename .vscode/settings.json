@@ -1,6 +1,8 @@
-{   
+{
+    "clang-format.executable": "U:/Code/MSToolkit/VC/Tools/Llvm/bin/clang-format",
     "cmake.sourceDirectory": "${workspaceFolder}",
     "cmake.buildDirectory": "${workspaceFolder}/build",
+    "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: Google, IndentWidth: 4, ColumnLimit: 0}",
     "files.associations": {
         "thread": "cpp",
         "algorithm": "cpp",

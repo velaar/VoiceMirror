@@ -1,42 +1,41 @@
 // main.cpp
-
-#include <iostream>
-#include <string>
-#include <windows.h>
-#include <atomic>
-#include <csignal>
-#include <fstream>
-#include <memory>
-#include <mutex>
-#include <sstream>
-#include <thread>
-#include <unordered_map>
-#include <endpointvolume.h>
-#include <mmdeviceapi.h>
-#include <propsys.h>
-#include <Functiondiscoverykeys_devpkey.h>
-#include <wrl/client.h>
-
 // Project-Specific Includes
 #include "COMUtilities.h"
 #include "DeviceMonitor.h"
+#include "Logger.h"
 #include "VoicemeeterAPI.h"
 #include "VoicemeeterManager.h"
 #include "VolumeMirror.h"
 #include "cxxopts.hpp"
-#include "Logger.h"
+
+#include <Functiondiscoverykeys_devpkey.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
+#include <propsys.h>
+#include <windows.h>
+#include <wrl/client.h>
+
+#include <atomic>
+#include <csignal>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <thread>
+#include <unordered_map>
+
+
 
 // Define unique names for the mutex and event
-constexpr char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";     // Mutex name
-constexpr char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent"; // Quit event name
+constexpr char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";      // Mutex name
+constexpr char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent";  // Quit event name
 
 // RAII Wrapper for Windows HANDLE
-struct HandleDeleter
-{
-    void operator()(HANDLE handle) const
-    {
-        if (handle && handle != INVALID_HANDLE_VALUE)
-        {
+struct HandleDeleter {
+    void operator()(HANDLE handle) const {
+        if (handle && handle != INVALID_HANDLE_VALUE) {
             CloseHandle(handle);
         }
     }
@@ -62,11 +61,9 @@ bool exitFlag = false;
  * @brief Helper function to create or open the quit event.
  * @return true if the event was successfully created or opened, false otherwise.
  */
-bool InitializeQuitEvent()
-{
+bool InitializeQuitEvent() {
     g_hQuitEvent.reset(CreateEventA(NULL, TRUE, FALSE, EVENT_NAME));
-    if (!g_hQuitEvent)
-    {
+    if (!g_hQuitEvent) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to create or open quit event. Error: " + std::to_string(GetLastError()));
         return false;
     }
@@ -78,33 +75,28 @@ bool InitializeQuitEvent()
  * @brief Signal handler for graceful shutdown.
  * @param signum The signal number.
  */
-void signalHandler(int signum)
-{
+void signalHandler(int signum) {
     Logger::Instance().Log(LogLevel::INFO, "Interrupt signal (" + std::to_string(signum) + ") received. Shutting down...");
     g_running = false;
-    cv.notify_one(); // Notify the main loop to exit
+    cv.notify_one();  // Notify the main loop to exit
 }
 
 /**
  * @brief Function to wait for the quit event to be signaled.
  */
-void WaitForQuitEvent()
-{
-    if (g_hQuitEvent)
-    {
+void WaitForQuitEvent() {
+    if (g_hQuitEvent) {
         Logger::Instance().Log(LogLevel::DEBUG, "Waiting for quit event signal...");
         WaitForSingleObject(g_hQuitEvent.get(), INFINITE);
         Logger::Instance().Log(LogLevel::DEBUG, "Quit event signaled. Initiating shutdown sequence...");
-        g_running = false; // Set to false to trigger main loop exit
+        g_running = false;  // Set to false to trigger main loop exit
 
         {
             std::lock_guard<std::mutex> lock(cv_mtx);
             exitFlag = true;
         }
         cv.notify_one();
-    }
-    else
-    {
+    } else {
         Logger::Instance().Log(LogLevel::ERR, "Quit event handle is null; unable to wait for quit event.");
     }
 }
@@ -115,22 +107,18 @@ void WaitForQuitEvent()
  * @param configMap Map to store configuration parameters.
  * @return true if successful, false otherwise.
  */
-bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::string, std::string> &configMap)
-{
+bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::string, std::string> &configMap) {
     std::ifstream configFile(configPath);
-    if (!configFile.is_open())
-    {
+    if (!configFile.is_open()) {
         Logger::Instance().Log(LogLevel::INFO, "Config file not found: " + configPath + ". Continuing with command line flags.");
         return false;
     }
 
     std::string line;
-    while (std::getline(configFile, line))
-    {
+    while (std::getline(configFile, line)) {
         // Find the position of the first '#' character
         size_t commentPos = line.find('#');
-        if (commentPos != std::string::npos)
-        {
+        if (commentPos != std::string::npos) {
             // Remove the comment part
             line = line.substr(0, commentPos);
         }
@@ -146,8 +134,7 @@ bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::stri
         std::istringstream iss(line);
         std::string key, value;
 
-        if (std::getline(iss, key, '=') && std::getline(iss, value))
-        {
+        if (std::getline(iss, key, '=') && std::getline(iss, value)) {
             // Trim whitespace from key and value
             key.erase(0, key.find_first_not_of(" \t\r\n"));
             key.erase(key.find_last_not_of(" \t\r\n") + 1);
@@ -163,8 +150,7 @@ bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::stri
 /**
  * @brief Configuration structure to store application parameters.
  */
-struct Config
-{
+struct Config {
     bool listMonitor = false;
     bool listInputs = false;
     bool listOutputs = false;
@@ -194,80 +180,45 @@ struct Config
  * @param configMap Map containing configuration parameters.
  * @param config Config struct to be updated.
  */
-void ApplyConfig(const std::unordered_map<std::string, std::string> &configMap, Config &config)
-{
-    for (const auto &kv : configMap)
-    {
+void ApplyConfig(const std::unordered_map<std::string, std::string> &configMap, Config &config) {
+    for (const auto &kv : configMap) {
         const std::string &key = kv.first;
         const std::string &value = kv.second;
 
-        if (key == "list-monitor")
-        {
+        if (key == "list-monitor") {
             config.listMonitor = (value == "true" || value == "1");
-        }
-        else if (key == "list-inputs")
-        {
+        } else if (key == "list-inputs") {
             config.listInputs = (value == "true" || value == "1");
-        }
-        else if (key == "list-outputs")
-        {
+        } else if (key == "list-outputs") {
             config.listOutputs = (value == "true" || value == "1");
-        }
-        else if (key == "list-channels")
-        {
+        } else if (key == "list-channels") {
             config.listChannels = (value == "true" || value == "1");
-        }
-        else if (key == "index")
-        {
+        } else if (key == "index") {
             config.index = std::stoi(value);
-        }
-        else if (key == "type")
-        {
+        } else if (key == "type") {
             config.type = value;
-        }
-        else if (key == "min")
-        {
+        } else if (key == "min") {
             config.minDbm = std::stof(value);
-        }
-        else if (key == "max")
-        {
+        } else if (key == "max") {
             config.maxDbm = std::stof(value);
-        }
-        else if (key == "voicemeeter")
-        {
+        } else if (key == "voicemeeter") {
             config.voicemeeterType = std::stoi(value);
-        }
-        else if (key == "debug")
-        {
+        } else if (key == "debug") {
             config.debug = (value == "true" || value == "1");
-        }
-        else if (key == "sound")
-        {
+        } else if (key == "sound") {
             config.sound = (value == "true" || value == "1");
-        }
-        else if (key == "monitor")
-        {
+        } else if (key == "monitor") {
             config.monitorDeviceUUID = value;
-        }
-        else if (key == "log")
-        {
+        } else if (key == "log") {
             config.loggingEnabled = true;
             config.logFilePath = value;
-        }
-        else if (key == "hidden")
-        {
+        } else if (key == "hidden") {
             config.hideConsole = (value == "true" || value == "1");
-        }
-        else if (key == "toggle")
-        {
+        } else if (key == "toggle") {
             config.toggleParam = value;
-        }
-        else if (key == "shutdown")
-        {
+        } else if (key == "shutdown") {
             config.shutdown = (value == "true" || value == "1");
-        }
-        else if (key == "polling")
-        {
+        } else if (key == "polling") {
             config.pollingEnabled = true;
             config.pollingInterval = std::stoi(value);
         }
@@ -277,10 +228,8 @@ void ApplyConfig(const std::unordered_map<std::string, std::string> &configMap, 
 /**
  * @brief Lists available audio devices for monitoring.
  */
-void ListMonitorableDevices()
-{
-    if (!InitializeCOM())
-    {
+void ListMonitorableDevices() {
+    if (!InitializeCOM()) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to initialize COM library.");
         return;
     }
@@ -288,8 +237,7 @@ void ListMonitorableDevices()
     // Create MMDeviceEnumerator
     ComPtr<IMMDeviceEnumerator> pEnumerator;
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), &pEnumerator);
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to create MMDeviceEnumerator.");
         UninitializeCOM();
         return;
@@ -298,8 +246,7 @@ void ListMonitorableDevices()
     // Enumerate active audio rendering devices
     ComPtr<IMMDeviceCollection> pCollection;
     hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollection);
-    if (FAILED(hr))
-    {
+    if (FAILED(hr)) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to enumerate audio endpoints.");
         UninitializeCOM();
         return;
@@ -309,21 +256,17 @@ void ListMonitorableDevices()
     pCollection->GetCount(&count);
 
     Logger::Instance().Log(LogLevel::INFO, "Available audio devices for monitoring:");
-    for (UINT i = 0; i < count; i++)
-    {
+    for (UINT i = 0; i < count; i++) {
         ComPtr<IMMDevice> pDevice;
         hr = pCollection->Item(i, &pDevice);
-        if (SUCCEEDED(hr))
-        {
+        if (SUCCEEDED(hr)) {
             ComPtr<IPropertyStore> pProps;
             hr = pDevice->OpenPropertyStore(STGM_READ, &pProps);
-            if (SUCCEEDED(hr))
-            {
+            if (SUCCEEDED(hr)) {
                 PROPVARIANT varName;
                 PropVariantInit(&varName);
                 hr = pProps->GetValue(PKEY_Device_FriendlyName, &varName);
-                if (SUCCEEDED(hr))
-                {
+                if (SUCCEEDED(hr)) {
                     LPWSTR deviceId = nullptr;
                     pDevice->GetId(&deviceId);
 
@@ -352,40 +295,34 @@ void ListMonitorableDevices()
     UninitializeCOM();
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     // Register signal handlers
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
     // Initialize variables for logging and config
     std::unordered_map<std::string, std::string> configMap;
-    std::ofstream logFileStream; // Log file stream
+    std::ofstream logFileStream;  // Log file stream
 
     // Create a named mutex to ensure single instance
     UniqueHandle hMutex(CreateMutexA(NULL, FALSE, MUTEX_NAME));
-    if (!hMutex)
-    {
+    if (!hMutex) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to create mutex.");
         return -1;
     }
 
     // Attempt to initialize the quit event for signaling
-    if (!InitializeQuitEvent())
-    {
+    if (!InitializeQuitEvent()) {
         Logger::Instance().Log(LogLevel::ERR, "Unable to initialize quit event.");
         return -1;
     }
 
     // Adjustments to ensure only one instance runs at a time with retry logic
-    if (GetLastError() == ERROR_ALREADY_EXISTS)
-    {
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
         // Another instance is running. Signal it to quit.
         UniqueHandle hQuitEvent(OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME));
-        if (hQuitEvent)
-        {
-            if (!SetEvent(hQuitEvent.get()))
-            {
+        if (hQuitEvent) {
+            if (!SetEvent(hQuitEvent.get())) {
                 Logger::Instance().Log(LogLevel::ERR, "Failed to signal quit event to the first instance.");
                 return -1;
             }
@@ -396,35 +333,28 @@ int main(int argc, char *argv[])
             bool mutexAcquired = false;
 
             // Loop to repeatedly attempt to acquire the mutex with exponential backoff
-            for (int i = 0; i < retryCount; ++i)
-            {
-                if (WaitForSingleObject(hMutex.get(), (i + 1) * 1000) == WAIT_OBJECT_0)
-                {
+            for (int i = 0; i < retryCount; ++i) {
+                if (WaitForSingleObject(hMutex.get(), (i + 1) * 1000) == WAIT_OBJECT_0) {
                     mutexAcquired = true;
                     break;
                 }
                 Logger::Instance().Log(LogLevel::DEBUG, "Waiting for previous instance to release mutex... attempt " + std::to_string(i + 1));
             }
 
-            if (!mutexAcquired)
-            {
+            if (!mutexAcquired) {
                 Logger::Instance().Log(LogLevel::ERR, "Previous instance did not release mutex in a timely manner.");
                 return -1;
             }
-        }
-        else
-        {
+        } else {
             Logger::Instance().Log(LogLevel::ERR, "Failed to open quit event. Cannot ensure single-instance operation.");
             return -1;
         }
-    }
-    else if (g_hQuitEvent) // Only create the quit event if the application is the first instance
+    } else if (g_hQuitEvent)  // Only create the quit event if the application is the first instance
     {
         // First instance setup
         Logger::Instance().Log(LogLevel::DEBUG, "First instance running, initializing quit event and waiting for signal.");
 
-        if (!g_hQuitEvent)
-        {
+        if (!g_hQuitEvent) {
             Logger::Instance().Log(LogLevel::ERR, "Failed to create quit event for the first instance.");
             return -1;
         }
@@ -455,14 +385,11 @@ int main(int argc, char *argv[])
         ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())
         ("v,version", "Show program's version number and exit");
 
-    
+
     cxxopts::ParseResult result;
-    try
-    {
+    try {
         auto result = options.parse(argc, argv);
-    }
-    catch (const cxxopts::exceptions::parsing &e)
-    {
+    } catch (const cxxopts::exceptions::parsing &e) {
         Logger::Instance().Log(LogLevel::ERR, "Unrecognized option or argument error: " + std::string(e.what()));
         Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
         return -1;
@@ -472,18 +399,14 @@ int main(int argc, char *argv[])
     Config config;
 
     // Set default config file path
-    if (result.count("config"))
-    {
+    if (result.count("config")) {
         config.configFilePath = result["config"].as<std::string>();
-    }
-    else
-    {
+    } else {
         config.configFilePath = "VoiceMirror.conf";
     }
 
     // Parse config file if it exists
-    if (ParseConfigFile(config.configFilePath, configMap))
-    {
+    if (ParseConfigFile(config.configFilePath, configMap)) {
         ApplyConfig(configMap, config);
         Logger::Instance().Log(LogLevel::INFO, "Configuration file parsed successfully.");
     }
@@ -513,8 +436,7 @@ int main(int argc, char *argv[])
         config.sound = true;
     if (result.count("monitor"))
         config.monitorDeviceUUID = result["monitor"].as<std::string>();
-    if (result.count("log"))
-    {
+    if (result.count("log")) {
         config.loggingEnabled = true;
         config.logFilePath = result["log"].as<std::string>();
     }
@@ -528,74 +450,58 @@ int main(int argc, char *argv[])
         config.help = true;
     if (result.count("version"))
         config.version = true;
-    if (result.count("polling"))
-    {
+    if (result.count("polling")) {
         config.pollingEnabled = true;
         config.pollingInterval = result["polling"].as<int>();
     }
 
     // Set up logging
-    if (config.debug)
-    {
+    if (config.debug) {
         Logger::Instance().SetLogLevel(LogLevel::DEBUG);
-    }
-    else
-    {
+    } else {
         Logger::Instance().SetLogLevel(LogLevel::INFO);
     }
 
-    if (config.loggingEnabled)
-    {
+    if (config.loggingEnabled) {
         Logger::Instance().EnableFileLogging(config.logFilePath);
     }
 
     // Handle help
-    if (config.help)
-    {
+    if (config.help) {
         Logger::Instance().Log(LogLevel::INFO, options.help());
         return 0;
     }
 
     // Handle version
-    if (config.version)
-    {
+    if (config.version) {
         Logger::Instance().Log(LogLevel::INFO, "VoiceMirror Version 0.1.10-pre-alpha");
         return 0;
     }
 
     // Handle hidden console window
-    if (config.hideConsole)
-    {
-        if (!config.loggingEnabled)
-        {
+    if (config.hideConsole) {
+        if (!config.loggingEnabled) {
             Logger::Instance().Log(LogLevel::ERR, "--hidden option requires --log to be specified.");
             return -1;
         }
 
         // Hide the console window
         HWND hWnd = GetConsoleWindow();
-        if (hWnd != NULL)
-        {
-            if (FreeConsole() == 0)
-            {
+        if (hWnd != NULL) {
+            if (FreeConsole() == 0) {
                 Logger::Instance().Log(LogLevel::ERR, "Failed to detach console. Error: " + std::to_string(GetLastError()));
             }
-        }
-        else
-        {
+        } else {
             Logger::Instance().Log(LogLevel::ERR, "Failed to get console window handle.");
         }
     }
 
     // Handle shutdown
-    if (config.shutdown)
-    {
+    if (config.shutdown) {
         // Attempt to signal any running instances to quit
         UniqueHandle hQuitEvent(OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME));
-        if (hQuitEvent)
-        {
-            if (!SetEvent(hQuitEvent.get()))
-            {
+        if (hQuitEvent) {
+            if (!SetEvent(hQuitEvent.get())) {
                 Logger::Instance().Log(LogLevel::ERR, "Failed to signal quit event to running instances.");
                 return -1;
             }
@@ -609,8 +515,7 @@ int main(int argc, char *argv[])
     }
 
     // Handle list monitorable devices
-    if (config.listMonitor)
-    {
+    if (config.listMonitor) {
         ListMonitorableDevices();
         return 0;
     }
@@ -619,33 +524,29 @@ int main(int argc, char *argv[])
     VoicemeeterManager vmrManager;
     vmrManager.SetDebugMode(config.debug);
 
-    if (!vmrManager.Initialize(config.voicemeeterType))
-    {
+    if (!vmrManager.Initialize(config.voicemeeterType)) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to initialize Voicemeeter Manager.");
         return -1;
     }
 
     // Handle list inputs
-    if (config.listInputs)
-    {
+    if (config.listInputs) {
         vmrManager.ListInputs();
-        vmrManager.Shutdown(); // Clean up
+        vmrManager.Shutdown();  // Clean up
         return 0;
     }
 
     // Handle list outputs
-    if (config.listOutputs)
-    {
+    if (config.listOutputs) {
         vmrManager.ListOutputs();
-        vmrManager.Shutdown(); // Clean up
+        vmrManager.Shutdown();  // Clean up
         return 0;
     }
 
     // Handle list channels
-    if (config.listChannels)
-    {
+    if (config.listChannels) {
         vmrManager.ListAllChannels();
-        vmrManager.Shutdown(); // Clean up
+        vmrManager.Shutdown();  // Clean up
         return 0;
     }
 
@@ -657,16 +558,11 @@ int main(int argc, char *argv[])
 
     // Validate 'type' option
     ChannelType channelType;
-    if (typeStr == "input" || typeStr == "Input")
-    {
+    if (typeStr == "input" || typeStr == "Input") {
         channelType = ChannelType::Input;
-    }
-    else if (typeStr == "output" || typeStr == "Output")
-    {
+    } else if (typeStr == "output" || typeStr == "Output") {
         channelType = ChannelType::Output;
-    }
-    else
-    {
+    } else {
         Logger::Instance().Log(LogLevel::ERR, "Invalid type specified. Use 'input' or 'output'.");
         vmrManager.Shutdown();
         return -1;
@@ -678,10 +574,8 @@ int main(int argc, char *argv[])
 
     ToggleConfig toggleConfig;
     bool isToggleEnabled = false;
-    if (!config.toggleParam.empty())
-    {
-        if (!isMonitoring)
-        {
+    if (!config.toggleParam.empty()) {
+        if (!isMonitoring) {
             Logger::Instance().Log(LogLevel::ERR, "--toggle parameter requires --monitor to be specified.");
             vmrManager.Shutdown();
             return -1;
@@ -692,8 +586,7 @@ int main(int argc, char *argv[])
         size_t firstColon = toggleParam.find(':');
         size_t secondColon = toggleParam.find(':', firstColon + 1);
 
-        if (firstColon == std::string::npos || secondColon == std::string::npos)
-        {
+        if (firstColon == std::string::npos || secondColon == std::string::npos) {
             Logger::Instance().Log(LogLevel::ERR, "Invalid --toggle format. Expected format: type:index1:index2 (e.g., input:0:1)");
             vmrManager.Shutdown();
             return -1;
@@ -703,22 +596,18 @@ int main(int argc, char *argv[])
         std::string index1Str = toggleParam.substr(firstColon + 1, secondColon - firstColon - 1);
         std::string index2Str = toggleParam.substr(secondColon + 1);
 
-        try
-        {
+        try {
             toggleConfig.index1 = std::stoi(index1Str);
             toggleConfig.index2 = std::stoi(index2Str);
             isToggleEnabled = true;
-        }
-        catch (const std::exception &ex)
-        {
+        } catch (const std::exception &ex) {
             Logger::Instance().Log(LogLevel::ERR, "Invalid indices in --toggle parameter: " + std::string(ex.what()));
             vmrManager.Shutdown();
             return -1;
         }
 
         // Validate toggle type
-        if (toggleConfig.type != "input" && toggleConfig.type != "output")
-        {
+        if (toggleConfig.type != "input" && toggleConfig.type != "output") {
             Logger::Instance().Log(LogLevel::ERR, "Invalid toggle type: " + toggleConfig.type + ". Use 'input' or 'output'.");
             vmrManager.Shutdown();
             return -1;
@@ -726,26 +615,21 @@ int main(int argc, char *argv[])
     }
 
     // Initialize VolumeMirror
-    try
-    {
+    try {
         VolumeMirror mirror(channelIndex, channelType, minDbm, maxDbm, vmrManager, config.sound);
-        mirror.SetPollingMode(config.pollingEnabled, config.pollingInterval); // Set polling mode
+        mirror.SetPollingMode(config.pollingEnabled, config.pollingInterval);  // Set polling mode
 
         mirror.Start();
         Logger::Instance().Log(LogLevel::INFO, "Volume mirroring started.");
 
         // Initialize DeviceMonitor if monitoring is enabled
         std::unique_ptr<DeviceMonitor> deviceMonitor = nullptr;
-        if (isMonitoring)
-        {
+        if (isMonitoring) {
             deviceMonitor = std::make_unique<DeviceMonitor>(monitorDeviceUUID, toggleConfig, vmrManager, mirror);
 
-            try
-            {
+            try {
                 Logger::Instance().Log(LogLevel::INFO, "Started monitoring device UUID: " + monitorDeviceUUID);
-            }
-            catch (const std::exception &ex)
-            {
+            } catch (const std::exception &ex) {
                 Logger::Instance().Log(LogLevel::ERR, "Failed to initialize DeviceMonitor: " + std::string(ex.what()));
                 return -1;
             }
@@ -755,17 +639,15 @@ int main(int argc, char *argv[])
 
         // Start a thread to wait for the quit event
         std::unique_ptr<std::thread> quitThread;
-        if (isMonitoring)
-        {
-            quitThread = std::make_unique<std::thread>(WaitForQuitEvent); // Only create if needed
+        if (isMonitoring) {
+            quitThread = std::make_unique<std::thread>(WaitForQuitEvent);  // Only create if needed
         }
 
         // Main loop to keep the application running until Ctrl+C is pressed
         {
             std::unique_lock<std::mutex> lock(cv_mtx);
             // Wait for signal handler to set g_running to false
-            cv.wait(lock, []
-                    { return !g_running.load(); });
+            cv.wait(lock, [] { return !g_running.load(); });
         }
 
         // Proper shutdown by setting API command and cleaning resources
@@ -773,9 +655,7 @@ int main(int argc, char *argv[])
         vmrManager.Shutdown();
 
         Logger::Instance().Log(LogLevel::INFO, "VoiceMirror has shut down gracefully.");
-    }
-    catch (const std::exception &ex)
-    {
+    } catch (const std::exception &ex) {
         Logger::Instance().Log(LogLevel::ERR, "An error occurred: " + std::string(ex.what()));
         vmrManager.Shutdown();
         return -1;

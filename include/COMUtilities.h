@@ -4,5 +4,4 @@
 bool InitializeCOM();
 void UninitializeCOM();
 
-
-//void LogStackTrace();
+// void LogStackTrace();
