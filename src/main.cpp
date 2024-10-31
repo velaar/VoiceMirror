@@ -120,7 +120,7 @@ bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::stri
     std::ifstream configFile(configPath);
     if (!configFile.is_open())
     {
-        Logger::Instance().Log(LogLevel::WARNING, "Failed to open config file: " + configPath);
+        Logger::Instance().Log(LogLevel::INFO, "Config file not found: " + configPath + ". Continuing with command line flags.");
         return false;
     }
 
@@ -186,7 +186,7 @@ struct Config
     std::string toggleParam;
     bool shutdown = false;
     bool pollingEnabled = false;
-    int pollingInterval = 100; // Default polling interval in milliseconds
+    int pollingInterval = 100;
 };
 
 /**
@@ -271,7 +271,6 @@ void ApplyConfig(const std::unordered_map<std::string, std::string> &configMap, 
             config.pollingEnabled = true;
             config.pollingInterval = std::stoi(value);
         }
-        // Handle other parameters as needed
     }
 }
 
@@ -434,31 +433,40 @@ int main(int argc, char *argv[])
     // Define command-line options
     cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
 
-    // Add command-line options
     options.add_options()
-        ("M,list-monitor", "List monitorable audio devices and exit")
-        ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
-        ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
         ("C,list-channels", "List all Voicemeeter channels with their labels and exit")
-        ("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>())
-        ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())
-        ("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>())
-        ("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>())
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>())
-        ("d,debug", "Enable debug mode for extensive logging")
-        ("v,version", "Show program's version number and exit")
-        ("h,help", "Show help message and exit")
-        ("s,shutdown", "Shutdown all instances of the app and exit immediately")
-        ("S,sound", "Enable chime sound on sync from Voicemeeter to Windows")
-        ("m,monitor", "Monitor a specific audio device by UUID", cxxopts::value<std::string>())
-        ("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>())
-        ("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())
         ("H,hidden", "Hide the console window. Use with --log to run without showing the console.")
-        ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
-        ("P,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->implicit_value("100"));
+        ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
+        ("M,list-monitor", "List monitorable audio devices and exit")
+        ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
+        ("S,sound", "Enable chime sound on sync from Voicemeeter to Windows")
+        ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
+        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>())
+        ("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())
+        ("d,debug", "Enable debug mode for extensive logging")
+        ("h,help", "Show help message and exit")
+        ("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>())
+        ("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>())
+        ("m,monitor", "Monitor a specific audio device by UUID and restart audio engine on plug/unplug events", cxxopts::value<std::string>())
+        ("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>())
+        ("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>())
+        ("p,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->implicit_value("100"))
+        ("s,shutdown", "Shutdown all instances of the app and exit immediately")
+        ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())
+        ("v,version", "Show program's version number and exit");
 
-    // Parse command-line options
-    auto result = options.parse(argc, argv);
+    
+    cxxopts::ParseResult result;
+    try
+    {
+        auto result = options.parse(argc, argv);
+    }
+    catch (const cxxopts::exceptions::parsing &e)
+    {
+        Logger::Instance().Log(LogLevel::ERR, "Unrecognized option or argument error: " + std::string(e.what()));
+        Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
+        return -1;
+    }
 
     // Initialize Config with default values
     Config config;
@@ -593,7 +601,6 @@ int main(int argc, char *argv[])
             }
             Logger::Instance().Log(LogLevel::INFO, "Signaled running instances to quit.");
         }
-        else
         {
             Logger::Instance().Log(LogLevel::INFO, "No running instances found.");
         }

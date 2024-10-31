@@ -3,6 +3,7 @@
 #include "VoicemeeterAPI.h"
 #include "Logger.h" // Include Logger for logging instead of std::cout
 #include <string>
+#include <cstring>
 
 /**
  * @brief Constructor for VoicemeeterAPI.
@@ -39,43 +40,40 @@ bool VoicemeeterAPI::Initialize()
 
     // Determine DLL name based on architecture
 #ifdef _WIN64
-    const char *dllName = "VoicemeeterRemote64.dll";
+    const char *dllFullPath = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote64.dll";
 #else
-    const char *dllName = "VoicemeeterRemote.dll";
+    const char *dllFullPath = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote.dll";
 #endif
 
     // Load the DLL
     Logger::Instance().Log(LogLevel::DEBUG, "Initializing Voicemeeter API...");
 
+    hVoicemeeter = LoadLibraryA(dllFullPath);
 
-    std::string dllPath = "C:\\Program Files (x86)\\VB\\Voicemeeter\\" + std::string(dllName);
-    Logger::Instance().Log(LogLevel::DEBUG, "Attempting to load " + std::string(dllPath) + std::string(dllName) + ".");
-
-    hVoicemeeter = LoadLibraryA(dllPath.c_str()); // Use appropriate DLL name based on your application (32-bit vs 64-bit)
-
-    if (hVoicemeeter == NULL) {
-        DWORD error = GetLastError();
-        Logger::Instance().Log(LogLevel::ERR, "Failed to load " + std::string(dllPath) + std::string(dllName) + ". Error code: " + std::to_string(error));
-        Logger::Instance().Log(LogLevel::DEBUG, "Attempting to load from VoiceMirror Folder" + std::string(dllName) + ". Error code: " + std::to_string(error));
-        hVoicemeeter = LoadLibraryA(dllName); // Use appropriate DLL name based on your application (32-bit vs 64-bit)
-    
+    if (hVoicemeeter != NULL)
+    {
+        Logger::Instance().Log(LogLevel::DEBUG, "Loaded VoiceMirror DLL: " + std::string(dllFullPath) + ".");
     }
-
-
-
-    if (hVoicemeeter == NULL)
+    else
     {
         DWORD error = GetLastError();
-        Logger::Instance().Log(LogLevel::ERR, "Failed to find " + std::string(dllName) + ". Error code: " + std::to_string(error));
-        return false;
+        Logger::Instance().Log(LogLevel::ERR, "Failed to load " + std::string(dllFullPath) + ". Error code: " + std::to_string(error));
+        Logger::Instance().Log(LogLevel::DEBUG, "Attempting to load DLL from VoiceMirror Folder" + std::string(strrchr(dllFullPath, '\\')) + ". Error code: " + std::to_string(error));
+
+        hVoicemeeter = LoadLibraryA(strrchr(strrchr(dllFullPath, '\\'), '\\'));
+        if (hVoicemeeter == NULL)
+        {
+            DWORD error = GetLastError();
+            Logger::Instance().Log(LogLevel::ERR, "Failed to find " + std::string(strrchr(dllFullPath, '\\')) + ". Error code: " + std::to_string(error));
+            return false;
+        }
     }
 
     // Retrieve function pointers
 
     VBVMR_Login = (T_VBVMR_Login)GetProcAddress(hVoicemeeter, "VBVMR_Login");
     VBVMR_Logout = (T_VBVMR_Logout)GetProcAddress(hVoicemeeter, "VBVMR_Logout");
-    
-    
+
     VBVMR_GetVoicemeeterType = (T_VBVMR_GetVoicemeeterType)GetProcAddress(hVoicemeeter, "VBVMR_GetVoicemeeterType");
     VBVMR_GetVoicemeeterVersion = (T_VBVMR_GetVoicemeeterVersion)GetProcAddress(hVoicemeeter, "VBVMR_GetVoicemeeterVersion");
     VBVMR_RunVoicemeeter = (T_VBVMR_RunVoicemeeter)GetProcAddress(hVoicemeeter, "VBVMR_RunVoicemeeter");
@@ -112,7 +110,7 @@ bool VoicemeeterAPI::Initialize()
     VBVMR_MacroButton_SetStatus = (T_VBVMR_MacroButton_SetStatus)GetProcAddress(hVoicemeeter, "VBVMR_MacroButton_SetStatus");
 
     // Verify all required functions are loaded
-    if (!VBVMR_Login || !VBVMR_Logout || !VBVMR_RunVoicemeeter  ||
+    if (!VBVMR_Login || !VBVMR_Logout || !VBVMR_RunVoicemeeter ||
         !VBVMR_GetVoicemeeterType || !VBVMR_GetVoicemeeterVersion ||
         !VBVMR_IsParametersDirty || !VBVMR_GetParameterFloat ||
         !VBVMR_GetParameterStringA || !VBVMR_GetParameterStringW ||
@@ -126,15 +124,15 @@ bool VoicemeeterAPI::Initialize()
         !VBVMR_AudioCallbackStop || !VBVMR_AudioCallbackUnregister ||
         !VBVMR_MacroButton_IsDirty || !VBVMR_MacroButton_GetStatus ||
         !VBVMR_MacroButton_SetStatus)
-     {
+    {
         Logger::Instance().Log(LogLevel::ERR, "Failed to get function pointers from VoicemeeterRemote DLL.");
         FreeLibrary(hVoicemeeter);
-        initialized = false; 
+        initialized = false;
         hVoicemeeter = NULL;
         return false;
     }
     Logger::Instance().Log(LogLevel::DEBUG, "All Voicemeeter API functions loaded successfully.");
-    initialized = true; 
+    initialized = true;
     return true;
 }
 
@@ -174,8 +172,10 @@ long VoicemeeterAPI::Logout()
     return -1;
 }
 
-long VoicemeeterAPI::RunVoicemeeter(long vType) {
-    if (VBVMR_RunVoicemeeter) {
+long VoicemeeterAPI::RunVoicemeeter(long vType)
+{
+    if (VBVMR_RunVoicemeeter)
+    {
         long result = VBVMR_RunVoicemeeter(vType);
         std::cout << "RunVoicemeeter(" << vType << ") result: " << result << std::endl;
         return result;
@@ -213,7 +213,6 @@ long VoicemeeterAPI::IsParametersDirty()
 
     return -1;
 }
-
 
 long VoicemeeterAPI::GetParameterStringA(const char *param, char *str)
 {
@@ -260,11 +259,11 @@ long VoicemeeterAPI::SendMidiMessage(unsigned char *buffer, long numBytes)
     return -1;
 }
 
-long VoicemeeterAPI::GetParameterFloat(const char* param, float* value)
+long VoicemeeterAPI::GetParameterFloat(const char *param, float *value)
 {
     if (VBVMR_GetParameterFloat)
     {
-        long result = VBVMR_GetParameterFloat(const_cast<char*>(param), value);
+        long result = VBVMR_GetParameterFloat(const_cast<char *>(param), value);
         if (result == 0) // Assuming 0 indicates success
         {
             Logger::Instance().Log(LogLevel::DEBUG, std::string("GetParameterFloat succeeded for ") + param + " with value: " + std::to_string(*value));
@@ -282,11 +281,11 @@ long VoicemeeterAPI::GetParameterFloat(const char* param, float* value)
     }
 }
 
-long VoicemeeterAPI::SetParameterFloat(const char* param, float value)
+long VoicemeeterAPI::SetParameterFloat(const char *param, float value)
 {
     if (VBVMR_SetParameterFloat)
     {
-        long result = VBVMR_SetParameterFloat(const_cast<char*>(param), value);
+        long result = VBVMR_SetParameterFloat(const_cast<char *>(param), value);
         if (result == 0)
         {
             Logger::Instance().Log(LogLevel::DEBUG, std::string("SetParameterFloat succeeded for ") + param + " with value: " + std::to_string(value));
@@ -304,11 +303,11 @@ long VoicemeeterAPI::SetParameterFloat(const char* param, float value)
     }
 }
 
-long VoicemeeterAPI::SetParameters(const char* script)
+long VoicemeeterAPI::SetParameters(const char *script)
 {
     if (VBVMR_SetParameters)
     {
-        long result = VBVMR_SetParameters(const_cast<char*>(script));
+        long result = VBVMR_SetParameters(const_cast<char *>(script));
         if (result == 0)
         {
             Logger::Instance().Log(LogLevel::DEBUG, std::string("SetParameters succeeded with script: ") + script);

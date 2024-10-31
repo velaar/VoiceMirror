@@ -3,3 +3,6 @@
 
 bool InitializeCOM();
 void UninitializeCOM();
+
+
+//void LogStackTrace();

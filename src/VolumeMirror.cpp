@@ -178,14 +178,10 @@ void VolumeMirror::Start()
     {
         // Start the monitoring thread
         monitorThread = std::thread(&VolumeMirror::MonitorVoicemeeter, this);
-        Logger::Instance().Log(LogLevel::INFO, "Polling mode enabled with interval: " + std::to_string(pollingInterval) + "ms");
-    }
-    else
-    {
-        Logger::Instance().Log(LogLevel::INFO, "Polling mode disabled. Sync is one-way from Windows to Voicemeeter.");
+        Logger::Instance().Log(LogLevel::INFO, "Polling mode running with interval: " + std::to_string(pollingInterval) + "ms");
     }
 
-    Logger::Instance().Log(LogLevel::INFO, "VolumeMirror started.");
+    Logger::Instance().Log(LogLevel::DEBUG, "VolumeMirror - mirroring started.");
 }
 
 // Stop the volume mirroring
@@ -213,8 +209,10 @@ void VolumeMirror::SetPollingMode(bool enabled, int interval)
     pollingInterval = interval;
     lastSoundPlayTime = std::chrono::steady_clock::now() - soundCooldownDuration;
 
-    Logger::Instance().Log(LogLevel::INFO, "Polling mode " + std::string(enabled ? "enabled" : "disabled") +
-                                               " with interval: " + std::to_string(pollingInterval) + "ms");
+    Logger::Instance().Log(LogLevel::INFO, 
+                       "Polling mode " + std::string(enabled ? "enabled" : "disabled -  Sync is one-way from Windows to Voicemeeter.") +
+                       (enabled ? " with interval: " + std::to_string(pollingInterval) + "ms" : ""));
+
 }
 
 // IUnknown methods
