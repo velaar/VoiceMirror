@@ -18,3 +18,4 @@ vcpkg*
 # Built Visual Studio Code Extensions
 *.vsix
 git_stats.py
+Desktop.ini

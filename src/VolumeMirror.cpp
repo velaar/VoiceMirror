@@ -519,7 +519,7 @@ void VolumeMirror::PlaySyncSound()
     if (!played)
     {
         // If the sound file does not exist or fails to play, play the default chime
-        PlaySound(TEXT("Asterisk"), NULL, SND_ALIAS | SND_ASYNC);
+        PlaySound(TEXT("SystemAsterisk"), NULL, SND_ALIAS | SND_ASYNC);
         Logger::Instance().Log(LogLevel::DEBUG, "Played default system sound.");
     }
     else
