@@ -1,4 +1,9 @@
-// VolumeMirror.cpp
+/// <summary>
+/// The VolumeMirror class is responsible for mirroring the volume and mute state between the Windows audio endpoint and the Voicemeeter audio mixer.
+/// It listens for volume changes in the Windows audio endpoint and updates the corresponding Voicemeeter channel accordingly. It also monitors the Voicemeeter channels and updates the Windows audio endpoint volume and mute state.
+/// The class supports both polling-based and event-driven synchronization modes, and can optionally play a sound when the volume is synchronized.
+/// </summary>
+
 
 #include "VolumeMirror.h"
 
@@ -26,7 +31,7 @@
 VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
                            float maxDbmVal, VoicemeeterManager &manager,
                            bool playSound)
-    : channelIndex(channelIdx), channelType(type), minDbm(minDbmVal), maxDbm(maxDbmVal), voicemeeterManager(manager), vmrAPI(nullptr), lastWindowsVolume(-1.0f), lastWindowsMute(false), lastVmVolume(-1.0f), lastVmMute(false), ignoreWindowsChange(false), ignoreVoicemeeterChange(false), running(false), refCount(1), playSoundOnSync(playSound), pollingEnabled(false), pollingInterval(100), lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(pollingInterval + 10)), debounceDuration(50)
+    : channelIndex(channelIdx), channelType(type), minDbm(minDbmVal), maxDbm(maxDbmVal), voicemeeterManager(manager), vmrAPI(nullptr), lastWindowsVolume(-1.0f), lastWindowsMute(false), lastVmVolume(-1.0f), lastVmMute(false), ignoreWindowsChange(false), ignoreVoicemeeterChange(false), running(false), refCount(1), playSoundOnSync(playSound), pollingEnabled(false), pollingInterval(100), lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(pollingInterval + 10)), debounceDuration(500)
 // debounceDuration((((pollingInterval + 10) > (100)) ? (pollingInterval + 10) :
 // (100))
 
@@ -326,22 +331,19 @@ void VolumeMirror::MonitorVoicemeeter() {
                 }
             }
         }
-
-        // Check if the debounce period has passed since the last change
-        if (pendingSound) {
-            auto now = std::chrono::steady_clock::now();
-            auto timeSinceLastChange = now - lastVmChangeTime;
-            if (timeSinceLastChange >= debounceDuration) {
-                if (playSoundOnSync) {
-                    Logger::Instance().Log(
-                        LogLevel::DEBUG,
-                        "Debounce period elapsed. Playing synchronization sound.");
-                    PlaySyncSound();
-                }
-                pendingSound = false;
-            }
-        }
-    }
+          // Check if the debounce period has passed since the last change
+          if (pendingSound) {
+              auto now = std::chrono::steady_clock::now();
+              auto timeSinceLastChange = now - lastVmChangeTime;
+              if (timeSinceLastChange >= debounceDuration) {
+                  Logger::Instance().Log(LogLevel::DEBUG, "Playing sync sound after debounce period");
+                  if (playSoundOnSync) {
+                      PlaySyncSound();  
+                  }
+                  pendingSound = false;
+              }
+          }
+      }
     UninitializeCOM();
 }
 
@@ -451,26 +453,25 @@ float VolumeMirror::percentToDbm(float percent) {
 void VolumeMirror::PlaySyncSound() {
     std::lock_guard<std::mutex> lock(soundMutex);
     auto now = std::chrono::steady_clock::now();
-    auto timeSinceLastSound = now - lastSoundPlayTime;
-
+    
     const std::wstring soundFilePath = L"C:\\Windows\\Media\\Windows Unlock.wav";
-    BOOL played = FALSE;
-
-    // Attempt to play the specified sound file
-    played = PlaySoundW(soundFilePath.c_str(), NULL, SND_FILENAME | SND_ASYNC);
+    BOOL played = PlaySoundW(soundFilePath.c_str(), NULL, SND_FILENAME | SND_ASYNC);
 
     if (!played) {
-        // If the sound file does not exist or fails to play, play the default chime
-        PlaySound(TEXT("SystemAsterisk"), NULL, SND_ALIAS | SND_ASYNC);
-        Logger::Instance().Log(LogLevel::DEBUG, "Played default system sound.");
+        Logger::Instance().Log(LogLevel::DEBUG, "Failed to play custom sound, trying fallback");
+        // Always use the system asterisk sound as fallback
+        played = PlaySound(TEXT("SystemAsterisk"), NULL, SND_ALIAS | SND_ASYNC);
+        if (played) {
+            Logger::Instance().Log(LogLevel::DEBUG, "Fallback sound played successfully");
+        } else {
+            Logger::Instance().Log(LogLevel::ERR, "Both custom and fallback sounds failed to play");
+        }
     } else {
-        Logger::Instance().Log(LogLevel::DEBUG, "Played custom sync sound.");
+        Logger::Instance().Log(LogLevel::DEBUG, "Custom sound played successfully");
     }
-
+    
     lastSoundPlayTime = now;
-}
-
-// Helper method to check float equality with a tolerance
+}// Helper method to check float equality with a tolerance
 bool VolumeMirror::IsFloatEqual(float a, float b, float epsilon) {
     return std::fabs(a - b) < epsilon;
 }

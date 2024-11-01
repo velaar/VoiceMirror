@@ -1,14 +1,16 @@
-// main.cpp
-// Project-Specific Includes
-#include "COMUtilities.h"
-#include "DeviceMonitor.h"
-#include "Logger.h"
-#include "VoicemeeterAPI.h"
-#include "VoicemeeterManager.h"
-#include "VolumeMirror.h"
-#include "cxxopts.hpp"
+/**
+ * @file main.cpp
+ * @brief Main entry point for VoiceMirror application
+ *
+ * VoiceMirror synchronizes Windows audio volume with Voicemeeter channels.
+ * Key features:
+ * - Single instance management using Windows mutex
+ * - Configuration via command line and config file
+ * - Device monitoring and volume mirroring
+ * - Graceful shutdown handling
+ */
 
-#include <Functiondiscoverykeys_devpkey.h>
+// Project-Specific Includes
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <propsys.h>
@@ -23,16 +25,31 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 
+#include "COMUtilities.h"
+#include "ChannelUtility.h"
+#include "DeviceMonitor.h"
+#include "Logger.h"
+#include "Defconf.h"
+#include "VoicemeeterAPI.h"
+#include "VoicemeeterManager.h"
+#include "ConfigParser.h"
+#include "VolumeMirror.h"
+#include "cxxopts.hpp"
+#include <Functiondiscoverykeys_devpkey.h>
+
+using namespace std::string_view_literals;
 
 
-// Define unique names for the mutex and event
-constexpr char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";      // Mutex name
-constexpr char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent";  // Quit event name
-
-// RAII Wrapper for Windows HANDLE
+/**
+ * @struct HandleDeleter
+ * @brief RAII wrapper for Windows HANDLE cleanup
+ *
+ * Ensures proper cleanup of Windows handles when they go out of scope
+ */
 struct HandleDeleter {
     void operator()(HANDLE handle) const {
         if (handle && handle != INVALID_HANDLE_VALUE) {
@@ -71,14 +88,8 @@ bool InitializeQuitEvent() {
     return true;
 }
 
-/**
- * @brief Signal handler for graceful shutdown.
- * @param signum The signal number.
- */
-void signalHandler(int signum) {
-    Logger::Instance().Log(LogLevel::INFO, "Interrupt signal (" + std::to_string(signum) + ") received. Shutting down...");
-    g_running = false;
-    cv.notify_one();  // Notify the main loop to exit
+void TranslateStructuredException(unsigned int code, EXCEPTION_POINTERS *) {
+    throw std::runtime_error("Structured Exception: " + std::to_string(code));
 }
 
 /**
@@ -100,129 +111,31 @@ void WaitForQuitEvent() {
         Logger::Instance().Log(LogLevel::ERR, "Quit event handle is null; unable to wait for quit event.");
     }
 }
-
-/**
- * @brief Parses a key-value configuration file.
- * @param configPath Path to the config file.
- * @param configMap Map to store configuration parameters.
- * @return true if successful, false otherwise.
- */
-bool ParseConfigFile(const std::string &configPath, std::unordered_map<std::string, std::string> &configMap) {
-    std::ifstream configFile(configPath);
-    if (!configFile.is_open()) {
-        Logger::Instance().Log(LogLevel::INFO, "Config file not found: " + configPath + ". Continuing with command line flags.");
-        return false;
-    }
-
-    std::string line;
-    while (std::getline(configFile, line)) {
-        // Find the position of the first '#' character
-        size_t commentPos = line.find('#');
-        if (commentPos != std::string::npos) {
-            // Remove the comment part
-            line = line.substr(0, commentPos);
-        }
-
-        // Trim leading and trailing whitespace
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
-
-        // Skip empty lines after removing comments
-        if (line.empty())
-            continue;
-
-        std::istringstream iss(line);
-        std::string key, value;
-
-        if (std::getline(iss, key, '=') && std::getline(iss, value)) {
-            // Trim whitespace from key and value
-            key.erase(0, key.find_first_not_of(" \t\r\n"));
-            key.erase(key.find_last_not_of(" \t\r\n") + 1);
-            value.erase(0, value.find_first_not_of(" \t\r\n"));
-            value.erase(value.find_last_not_of(" \t\r\n") + 1);
-            configMap[key] = value;
-        }
-    }
-
-    return true;
+    /**
+   * @brief Parses a key-value configuration file.
+   * @param configPath Path to the config file.
+   * @param configMap Map to store configuration parameters.
+   */
+void ParseConfigFile(const std::string &configPath, std::unordered_map<std::string, std::string> &configMap) {
+    ConfigParser::ParseConfigFile(configPath, configMap);
 }
 
 /**
- * @brief Configuration structure to store application parameters.
- */
-struct Config {
-    bool listMonitor = false;
-    bool listInputs = false;
-    bool listOutputs = false;
-    bool listChannels = false;
-    int index = 3;
-    std::string type = "input";
-    float minDbm = -60.0f;
-    float maxDbm = 12.0f;
-    int voicemeeterType = 2;
-    bool debug = false;
-    bool version = false;
-    bool help = false;
-    bool sound = false;
-    std::string monitorDeviceUUID;
-    std::string logFilePath;
-    bool loggingEnabled = false;
-    bool hideConsole = false;
-    std::string configFilePath;
-    std::string toggleParam;
-    bool shutdown = false;
-    bool pollingEnabled = false;
-    int pollingInterval = 100;
-};
-
-/**
- * @brief Applies configuration parameters from the config file to the Config struct.
- * @param configMap Map containing configuration parameters.
+   * @brief Applies configuration parameters from the config file to the Config struct.
+   * @param configMap Map containing configuration parameters.
  * @param config Config struct to be updated.
  */
 void ApplyConfig(const std::unordered_map<std::string, std::string> &configMap, Config &config) {
-    for (const auto &kv : configMap) {
-        const std::string &key = kv.first;
-        const std::string &value = kv.second;
+    ConfigParser::ApplyConfig(configMap, config);
+}
 
-        if (key == "list-monitor") {
-            config.listMonitor = (value == "true" || value == "1");
-        } else if (key == "list-inputs") {
-            config.listInputs = (value == "true" || value == "1");
-        } else if (key == "list-outputs") {
-            config.listOutputs = (value == "true" || value == "1");
-        } else if (key == "list-channels") {
-            config.listChannels = (value == "true" || value == "1");
-        } else if (key == "index") {
-            config.index = std::stoi(value);
-        } else if (key == "type") {
-            config.type = value;
-        } else if (key == "min") {
-            config.minDbm = std::stof(value);
-        } else if (key == "max") {
-            config.maxDbm = std::stof(value);
-        } else if (key == "voicemeeter") {
-            config.voicemeeterType = std::stoi(value);
-        } else if (key == "debug") {
-            config.debug = (value == "true" || value == "1");
-        } else if (key == "sound") {
-            config.sound = (value == "true" || value == "1");
-        } else if (key == "monitor") {
-            config.monitorDeviceUUID = value;
-        } else if (key == "log") {
-            config.loggingEnabled = true;
-            config.logFilePath = value;
-        } else if (key == "hidden") {
-            config.hideConsole = (value == "true" || value == "1");
-        } else if (key == "toggle") {
-            config.toggleParam = value;
-        } else if (key == "shutdown") {
-            config.shutdown = (value == "true" || value == "1");
-        } else if (key == "polling") {
-            config.pollingEnabled = true;
-            config.pollingInterval = std::stoi(value);
-        }
-    }
+/**
+ * @brief Performs additional validation on the parsed command-line options.
+ * This function is called after parsing the command-line options but before applying them to the configuration.
+ * It checks that the parsed option values are within the expected ranges and throws an exception if any are invalid.
+ */
+void ValidateOptions(const cxxopts::ParseResult &result) {
+    ConfigParser::ValidateOptions(result);
 }
 
 /**
@@ -296,10 +209,6 @@ void ListMonitorableDevices() {
 }
 
 int main(int argc, char *argv[]) {
-    // Register signal handlers
-    std::signal(SIGINT, signalHandler);
-    std::signal(SIGTERM, signalHandler);
-
     // Initialize variables for logging and config
     std::unordered_map<std::string, std::string> configMap;
     std::ofstream logFileStream;  // Log file stream
@@ -308,7 +217,7 @@ int main(int argc, char *argv[]) {
     UniqueHandle hMutex(CreateMutexA(NULL, FALSE, MUTEX_NAME));
     if (!hMutex) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to create mutex.");
-        return -1;
+        return 1;  // Exit cleanly
     }
 
     // Attempt to initialize the quit event for signaling
@@ -319,82 +228,43 @@ int main(int argc, char *argv[]) {
 
     // Adjustments to ensure only one instance runs at a time with retry logic
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        // Another instance is running. Signal it to quit.
+        // Another instance exists - signal it and exit normally
         UniqueHandle hQuitEvent(OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME));
         if (hQuitEvent) {
-            if (!SetEvent(hQuitEvent.get())) {
-                Logger::Instance().Log(LogLevel::ERR, "Failed to signal quit event to the first instance.");
-                return -1;
-            }
-            Logger::Instance().Log(LogLevel::DEBUG, "Signaled quit event successfully. Waiting for first instance to exit.");
-
-            // Wait for the first instance to release the mutex by acquiring it
-            const int retryCount = 10;
-            bool mutexAcquired = false;
-
-            // Loop to repeatedly attempt to acquire the mutex with exponential backoff
-            for (int i = 0; i < retryCount; ++i) {
-                if (WaitForSingleObject(hMutex.get(), (i + 1) * 1000) == WAIT_OBJECT_0) {
-                    mutexAcquired = true;
-                    break;
-                }
-                Logger::Instance().Log(LogLevel::DEBUG, "Waiting for previous instance to release mutex... attempt " + std::to_string(i + 1));
-            }
-
-            if (!mutexAcquired) {
-                Logger::Instance().Log(LogLevel::ERR, "Previous instance did not release mutex in a timely manner.");
-                return -1;
-            }
-        } else {
-            Logger::Instance().Log(LogLevel::ERR, "Failed to open quit event. Cannot ensure single-instance operation.");
-            return -1;
+            SetEvent(hQuitEvent.get());
+            Logger::Instance().Log(LogLevel::INFO, "Signaled existing instance to quit.");
+            return 0;  // Exit cleanly
         }
-    } else if (g_hQuitEvent)  // Only create the quit event if the application is the first instance
-    {
-        // First instance setup
-        Logger::Instance().Log(LogLevel::DEBUG, "First instance running, initializing quit event and waiting for signal.");
-
-        if (!g_hQuitEvent) {
-            Logger::Instance().Log(LogLevel::ERR, "Failed to create quit event for the first instance.");
-            return -1;
-        }
+        Logger::Instance().Log(LogLevel::ERR, "Failed to signal existing instance.");
+        return 1;
     }
 
     // Define command-line options
-    cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
-
-    options.add_options()
-        ("C,list-channels", "List all Voicemeeter channels with their labels and exit")
-        ("H,hidden", "Hide the console window. Use with --log to run without showing the console.")
-        ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
-        ("M,list-monitor", "List monitorable audio devices and exit")
-        ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
-        ("S,sound", "Enable chime sound on sync from Voicemeeter to Windows")
-        ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>())
-        ("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())
-        ("d,debug", "Enable debug mode for extensive logging")
-        ("h,help", "Show help message and exit")
-        ("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>())
-        ("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>())
-        ("m,monitor", "Monitor a specific audio device by UUID and restart audio engine on plug/unplug events", cxxopts::value<std::string>())
-        ("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>())
-        ("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>())
-        ("p,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->implicit_value("100"))
-        ("s,shutdown", "Shutdown all instances of the app and exit immediately")
-        ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())
-        ("v,version", "Show program's version number and exit");
-
-
-    cxxopts::ParseResult result;
+    cxxopts::Options options = ConfigParser::CreateOptions();    cxxopts::ParseResult result;
     try {
-        auto result = options.parse(argc, argv);
+        options.positional_help("[optional args]")
+            .show_positional_help();
+
+        // Set parsing behavior to disallow unrecognized options
+        options.allow_unrecognised_options();
+        result = options.parse(argc, argv);
     } catch (const cxxopts::exceptions::parsing &e) {
         Logger::Instance().Log(LogLevel::ERR, "Unrecognized option or argument error: " + std::string(e.what()));
         Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
         return -1;
+    } catch (const std::exception &e) {
+        Logger::Instance().Log(LogLevel::ERR, "Error parsing options: " + std::string(e.what()));
+        Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
+        return -1;
     }
 
+    try {
+        ConfigParser::ValidateOptions(result);
+    } catch (const std::exception &e) {
+        Logger::Instance().Log(LogLevel::ERR, std::string("Invalid option value: ") + e.what());
+        Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
+        return -1;
+    }
     // Initialize Config with default values
     Config config;
 
@@ -406,54 +276,11 @@ int main(int argc, char *argv[]) {
     }
 
     // Parse config file if it exists
-    if (ParseConfigFile(config.configFilePath, configMap)) {
-        ApplyConfig(configMap, config);
-        Logger::Instance().Log(LogLevel::INFO, "Configuration file parsed successfully.");
-    }
+    ConfigParser::ParseConfigFile(config.configFilePath, configMap);
+    ConfigParser::ApplyConfig(configMap, config);
 
     // Update Config with command-line options (overrides config file)
-    if (result.count("list-monitor"))
-        config.listMonitor = true;
-    if (result.count("list-inputs"))
-        config.listInputs = true;
-    if (result.count("list-outputs"))
-        config.listOutputs = true;
-    if (result.count("list-channels"))
-        config.listChannels = true;
-    if (result.count("index"))
-        config.index = result["index"].as<int>();
-    if (result.count("type"))
-        config.type = result["type"].as<std::string>();
-    if (result.count("min"))
-        config.minDbm = result["min"].as<float>();
-    if (result.count("max"))
-        config.maxDbm = result["max"].as<float>();
-    if (result.count("voicemeeter"))
-        config.voicemeeterType = result["voicemeeter"].as<int>();
-    if (result.count("debug"))
-        config.debug = true;
-    if (result.count("sound"))
-        config.sound = true;
-    if (result.count("monitor"))
-        config.monitorDeviceUUID = result["monitor"].as<std::string>();
-    if (result.count("log")) {
-        config.loggingEnabled = true;
-        config.logFilePath = result["log"].as<std::string>();
-    }
-    if (result.count("hidden"))
-        config.hideConsole = true;
-    if (result.count("toggle"))
-        config.toggleParam = result["toggle"].as<std::string>();
-    if (result.count("shutdown"))
-        config.shutdown = true;
-    if (result.count("help"))
-        config.help = true;
-    if (result.count("version"))
-        config.version = true;
-    if (result.count("polling")) {
-        config.pollingEnabled = true;
-        config.pollingInterval = result["polling"].as<int>();
-    }
+    ConfigParser::ApplyCommandLineOptions(result, config);
 
     // Set up logging
     if (config.debug) {
@@ -521,8 +348,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Initialize VoicemeeterManager
-    VoicemeeterManager vmrManager;
-    vmrManager.SetDebugMode(config.debug);
+    VoicemeeterManager vmrManager;    vmrManager.SetDebugMode(config.debug);
 
     if (!vmrManager.Initialize(config.voicemeeterType)) {
         Logger::Instance().Log(LogLevel::ERR, "Failed to initialize Voicemeeter Manager.");
@@ -531,21 +357,21 @@ int main(int argc, char *argv[]) {
 
     // Handle list inputs
     if (config.listInputs) {
-        vmrManager.ListInputs();
+        ChannelUtility::ListInputs(vmrManager);
         vmrManager.Shutdown();  // Clean up
         return 0;
     }
 
     // Handle list outputs
     if (config.listOutputs) {
-        vmrManager.ListOutputs();
+        ChannelUtility::ListOutputs(vmrManager);
         vmrManager.Shutdown();  // Clean up
         return 0;
     }
 
     // Handle list channels
     if (config.listChannels) {
-        vmrManager.ListAllChannels();
+        ChannelUtility::ListAllChannels(vmrManager);
         vmrManager.Shutdown();  // Clean up
         return 0;
     }
@@ -613,19 +439,19 @@ int main(int argc, char *argv[]) {
             return -1;
         }
     }
+    std::unique_ptr<DeviceMonitor> deviceMonitor = nullptr;
+    std::unique_ptr<VolumeMirror> mirror = nullptr;
 
     // Initialize VolumeMirror
     try {
-        VolumeMirror mirror(channelIndex, channelType, minDbm, maxDbm, vmrManager, config.sound);
-        mirror.SetPollingMode(config.pollingEnabled, config.pollingInterval);  // Set polling mode
-
-        mirror.Start();
+        mirror = std::make_unique<VolumeMirror>(channelIndex, channelType, minDbm, maxDbm, vmrManager, config.sound);
+        mirror->SetPollingMode(config.pollingEnabled, config.pollingInterval);
+        mirror->Start();
         Logger::Instance().Log(LogLevel::INFO, "Volume mirroring started.");
 
         // Initialize DeviceMonitor if monitoring is enabled
-        std::unique_ptr<DeviceMonitor> deviceMonitor = nullptr;
         if (isMonitoring) {
-            deviceMonitor = std::make_unique<DeviceMonitor>(monitorDeviceUUID, toggleConfig, vmrManager, mirror);
+            deviceMonitor = std::make_unique<DeviceMonitor>(monitorDeviceUUID, toggleConfig, vmrManager, *mirror);
 
             try {
                 Logger::Instance().Log(LogLevel::INFO, "Started monitoring device UUID: " + monitorDeviceUUID);
@@ -646,13 +472,16 @@ int main(int argc, char *argv[]) {
         // Main loop to keep the application running until Ctrl+C is pressed
         {
             std::unique_lock<std::mutex> lock(cv_mtx);
-            // Wait for signal handler to set g_running to false
             cv.wait(lock, [] { return !g_running.load(); });
         }
 
-        // Proper shutdown by setting API command and cleaning resources
-        mirror.Stop();
-        vmrManager.Shutdown();
+        // Clean shutdown sequence
+        if (mirror) {
+            mirror->Stop();
+        }
+        deviceMonitor.reset();  // Release DeviceMonitor first
+        mirror.reset();         // Release VolumeMirror
+        vmrManager.Shutdown();  // Finally shutdown Voicemeeter
 
         Logger::Instance().Log(LogLevel::INFO, "VoiceMirror has shut down gracefully.");
     } catch (const std::exception &ex) {
@@ -660,6 +489,11 @@ int main(int argc, char *argv[]) {
         vmrManager.Shutdown();
         return -1;
     }
-
     return 0;
+}
+
+void signalHandler(int signum) {
+    Logger::Instance().Log(LogLevel::INFO, "Interrupt signal (" + std::to_string(signum) + ") received. Shutting down...");
+    g_running = false;
+    cv.notify_one();  // Notify the main loop to exit
 }

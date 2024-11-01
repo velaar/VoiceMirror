@@ -55,7 +55,7 @@ class Logger {
      * @param level The log level of the message.
      * @param message The message to log.
      */
-    void Log(LogLevel level, const std::string &message);
+    void Log(LogLevel level, std::string_view message);
 
    private:
     // Private constructor and destructor for singleton pattern

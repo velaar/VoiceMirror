@@ -58,7 +58,7 @@ void Logger::DisableFileLogging() {
  * @param level The log level of the message.
  * @param message The message to log.
  */
-void Logger::Log(LogLevel level, const std::string &message) {
+void Logger::Log(LogLevel level, std::string_view message) {
     if (static_cast<int>(level) < static_cast<int>(logLevel)) {
         return;
     }
