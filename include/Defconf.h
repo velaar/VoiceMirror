@@ -3,7 +3,6 @@
 
 
 // Application constants
-
 constexpr char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";      // Mutex name
 constexpr char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent";  // Quit event name
 constexpr int DEFAULT_CHANNEL_INDEX = 3;
@@ -37,4 +36,6 @@ struct Config {
     bool shutdown = false;
     bool pollingEnabled = false;
     int pollingInterval = 100;
+    int startupVolumePercent = 50;
+    bool startupSound = false;
 };

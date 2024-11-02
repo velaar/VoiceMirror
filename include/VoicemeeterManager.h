@@ -1,15 +1,22 @@
-#ifndef VOICEMEETERMANAGER_H
-#define VOICEMEETERMANAGER_H
+#pragma once
 
-#include <mutex>
-#include <memory>
-#include <string>
-#include <unordered_map>
 #include "VoicemeeterAPI.h"
+#include "VolumeUtils.h"
+#include <string>
+#include <mutex>
+#include <unordered_map>
+
+// Struct for holding volume and mute state
+struct ChannelState {
+    float volume;
+    bool isMuted;
+};
 
 class VoicemeeterManager {
-   public:
+public:
     VoicemeeterManager();
+    ~VoicemeeterManager();
+
     bool Initialize(int voicemeeterType);
     void Shutdown();
     void ShutdownCommand();
@@ -17,31 +24,33 @@ class VoicemeeterManager {
     void SetDebugMode(bool newDebugMode);
     bool GetDebugMode();
     VoicemeeterAPI& GetAPI();
+
+    // Channel management and information retrieval
     void ListAllChannels();
     void ListInputs();
     void ListOutputs();
+    bool GetVoicemeeterVolume(int channelIndex, VolumeUtils::ChannelType channelType, float &volumePercent, bool &isMuted);
+    void UpdateVoicemeeterVolume(int channelIndex, VolumeUtils::ChannelType channelType, float volumePercent, bool isMuted);
+    bool IsParametersDirty();
+    void ListMonitorableDevices();
 
-    bool SetChannelParameter(const std::string& type, int index, const std::string& parameter, float value);
-    float GetChannelParameter(const std::string& type, int index, const std::string& parameter);
-    bool ToggleChannelMute(const std::string& type, int index);
-    void SyncChannelVolumes(const std::string& type, int index1, int index2);
-    bool IsChannelMuted(const std::string& type, int index);
+    // Channel state management
+    bool InitializeVoicemeeterState(int channelIndex, VolumeUtils::ChannelType channelType);
+    float GetChannelVolume(int channelIndex, VolumeUtils::ChannelType channelType);
+    bool IsChannelMuted(int channelIndex, VolumeUtils::ChannelType channelType);
 
-   private:
+private:
     VoicemeeterAPI vmrAPI;
     bool loggedIn;
     bool debugMode;
+    bool comInitialized;
     std::mutex toggleMutex;
-    
-    struct ChannelState {
-        float volume;
-        bool muted;
-    };
-    std::unordered_map<std::string, ChannelState> channelStates;
-    
-    bool ValidateChannelType(const std::string& type) const;
-    bool ValidateChannelIndex(const std::string& type, int index) const;
-    std::string GetChannelIdentifier(const std::string& type, int index) const;
-};
 
-#endif  // VOICEMEETERMANAGER_H
+    // COM initialization methods
+    bool InitializeCOM();
+    void UninitializeCOM();
+
+    // Channel states
+    std::unordered_map<int, ChannelState> channelStates;
+    std::mutex channelStatesMutex;
+};

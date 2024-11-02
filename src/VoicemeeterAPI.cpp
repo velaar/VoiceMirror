@@ -18,23 +18,21 @@ VoicemeeterAPI::VoicemeeterAPI() {}
  * @brief Destructor for VoicemeeterAPI.
  *
  * Ensures that the Voicemeeter API is shut down and the DLL is unloaded.
- */
+*/
 VoicemeeterAPI::~VoicemeeterAPI() { Shutdown(); }
 
 /**
- * @brief Initializes the Voicemeeter API by loading the DLL and retrieving
- * function pointers.
- *
- * Determines the correct DLL based on system architecture, loads it, and
- * retrieves all necessary function pointers.
- *
- * @return True if initialization was successful, false otherwise.
- */
+  * @brief Initializes the Voicemeeter API by loading the DLL and retrieving
+  * function pointers.
+  *
+  * Determines the correct DLL based on system architecture, loads it, and
+  * retrieves all necessary function pointers.
+  *
+  * @return True if initialization was successful, false otherwise.
+  */
 bool VoicemeeterAPI::Initialize() {
     if (initialized == true) {
-        Logger::Instance().Log(
-            LogLevel::DEBUG,
-            "Query VoicemeeterAPI::Initialize - API initialized already...");
+        LOG_DEBUG("Query VoicemeeterAPI::Initialize - API initialized already...");
         return true;
     }
 
@@ -48,33 +46,27 @@ bool VoicemeeterAPI::Initialize() {
 #endif
 
     // Load the DLL
-    Logger::Instance().Log(LogLevel::DEBUG, "Initializing Voicemeeter API...");
+    LOG_DEBUG("Initializing Voicemeeter API...");
 
     hVoicemeeter = LoadLibraryA(dllFullPath);
-
     if (hVoicemeeter != NULL) {
-        Logger::Instance().Log(LogLevel::DEBUG, "Loaded VoiceMirror DLL: " +
-                                                    std::string(dllFullPath) + ".");
-    } else {
-        DWORD error = GetLastError();
-        Logger::Instance().Log(LogLevel::ERR,
-                               "Failed to load " + std::string(dllFullPath) +
-                                   ". Error code: " + std::to_string(error));
-        Logger::Instance().Log(LogLevel::DEBUG,
-                               "Attempting to load DLL from VoiceMirror Folder" +
-                                   std::string(strrchr(dllFullPath, '\\')) +
-                                   ". Error code: " + std::to_string(error));
+        LOG_DEBUG("Loaded VoiceMirror DLL: " + std::string(dllFullPath) + ".");
+    } else {       DWORD error = GetLastError();
+       LOG_ERROR("Failed to load " + std::string(dllFullPath) +
+              ". Error code: " + std::to_string(error));
+       LOG_DEBUG("Attempting to load DLL from VoiceMirror Folder" +
+              std::string(strrchr(dllFullPath, '\\')) +
+              ". Error code: " + std::to_string(error));
 
-        hVoicemeeter = LoadLibraryA(strrchr(strrchr(dllFullPath, '\\'), '\\'));
-        if (hVoicemeeter == NULL) {
-            DWORD error = GetLastError();
-            Logger::Instance().Log(LogLevel::ERR,
-                                   "Failed to find " +
-                                       std::string(strrchr(dllFullPath, '\\')) +
-                                       ". Error code: " + std::to_string(error));
-            return false;
-        }
-    }
+       hVoicemeeter = LoadLibraryA(strrchr(strrchr(dllFullPath, '\\'), '\\'));
+       if (hVoicemeeter == NULL) {
+           DWORD error = GetLastError();
+           LOG_ERROR("Failed to find " +
+                  std::string(strrchr(dllFullPath, '\\')) +
+                  ". Error code: " + std::to_string(error));
+           return false;
+       }
+   }
 
     // Retrieve function pointers
 
@@ -160,16 +152,13 @@ bool VoicemeeterAPI::Initialize() {
         !VBVMR_AudioCallbackStart || !VBVMR_AudioCallbackStop ||
         !VBVMR_AudioCallbackUnregister || !VBVMR_MacroButton_IsDirty ||
         !VBVMR_MacroButton_GetStatus || !VBVMR_MacroButton_SetStatus) {
-        Logger::Instance().Log(
-            LogLevel::ERR,
-            "Failed to get function pointers from VoicemeeterRemote DLL.");
+        LOG_ERROR("Failed to get function pointers from VoicemeeterRemote DLL.");
         FreeLibrary(hVoicemeeter);
         initialized = false;
         hVoicemeeter = NULL;
         return false;
     }
-    Logger::Instance().Log(LogLevel::DEBUG,
-                           "All Voicemeeter API functions loaded successfully.");
+    LOG_DEBUG("All Voicemeeter API functions loaded successfully.");
     initialized = true;
     return true;
 }
@@ -177,6 +166,7 @@ bool VoicemeeterAPI::Initialize() {
 /**
  * @brief Shuts down the Voicemeeter API and unloads the DLL.
  *
+ /**
  * Logs out from Voicemeeter and frees the loaded DLL.
  */
 void VoicemeeterAPI::Shutdown() {
@@ -184,8 +174,7 @@ void VoicemeeterAPI::Shutdown() {
         VBVMR_Logout();
         FreeLibrary(hVoicemeeter);
         hVoicemeeter = NULL;
-        Logger::Instance().Log(LogLevel::DEBUG,
-                               "Voicemeeter API shutdown and DLL unloaded.");
+        LOG_DEBUG("Voicemeeter API shutdown and DLL unloaded.");
     }
 }
 
@@ -208,8 +197,7 @@ long VoicemeeterAPI::Logout() {
 long VoicemeeterAPI::RunVoicemeeter(long vType) {
     if (VBVMR_RunVoicemeeter) {
         long result = VBVMR_RunVoicemeeter(vType);
-        std::cout << "RunVoicemeeter(" << vType << ") result: " << result
-                  << std::endl;
+        LOG_DEBUG("RunVoicemeeter(" + std::to_string(vType) + ") result: " + std::to_string(result));
         return result;
     }
     return -1;
@@ -231,116 +219,112 @@ long VoicemeeterAPI::GetVoicemeeterVersion(long *pVersion) {
 
 long VoicemeeterAPI::IsParametersDirty() {
     if (VBVMR_IsParametersDirty) {
-        Logger::Instance().Log(
-            LogLevel::DEBUG, std::string("IsParametersDirty function succeeded!"));
-
-        return VBVMR_IsParametersDirty();
+        long result = VBVMR_IsParametersDirty();
+        LOG_DEBUG("IsParametersDirty function " + std::string(result == 0 ? "succeeded" : "failed"));
+        return result;
     }
-    Logger::Instance().Log(LogLevel::DEBUG,
-                           std::string("IsParametersDirty function failed!"));
-
+    LOG_ERROR("IsParametersDirty function pointer is NULL");
     return -1;
 }
 
 long VoicemeeterAPI::GetParameterStringA(const char *param, char *str) {
     if (VBVMR_GetParameterStringA) {
-        return VBVMR_GetParameterStringA(const_cast<char *>(param), str);
+        long result = VBVMR_GetParameterStringA(const_cast<char *>(param), str);
+        LOG_DEBUG("GetParameterStringA " + std::string(result == 0 ? "succeeded" : "failed") + 
+            " for parameter: " + param);
+        return result;
     }
+    LOG_ERROR("GetParameterStringA function pointer is NULL for parameter: " + std::string(param));
     return -1;
 }
 
 long VoicemeeterAPI::GetParameterStringW(const char *param,
                                          unsigned short *wszStr) {
     if (VBVMR_GetParameterStringW) {
-        return VBVMR_GetParameterStringW(const_cast<char *>(param), wszStr);
+        long result = VBVMR_GetParameterStringW(const_cast<char *>(param), wszStr);
+        LOG_DEBUG("GetParameterStringW " + std::string(result == 0 ? "succeeded" : "failed") + 
+            " for parameter: " + param);
+        return result;
     }
+    LOG_ERROR("GetParameterStringW function pointer is NULL for parameter: " + std::string(param));
     return -1;
 }
 
 long VoicemeeterAPI::GetLevel(long nType, long nuChannel, float *value) {
     if (VBVMR_GetLevel) {
-        return VBVMR_GetLevel(nType, nuChannel, value);
+        long result = VBVMR_GetLevel(nType, nuChannel, value);
+        LOG_DEBUG("GetLevel " + std::string(result == 0 ? "succeeded" : "failed") + 
+            " for type: " + std::to_string(nType) + ", channel: " + std::to_string(nuChannel));
+        return result;
     }
+    LOG_ERROR("GetLevel function pointer is NULL");
     return -1;
 }
 
 long VoicemeeterAPI::GetMidiMessage(unsigned char *buffer, long maxBytes) {
     if (VBVMR_GetMidiMessage) {
-        return VBVMR_GetMidiMessage(buffer, maxBytes);
+        long result = VBVMR_GetMidiMessage(buffer, maxBytes);
+        LOG_DEBUG("GetMidiMessage " + std::string(result == 0 ? "succeeded" : "failed"));
+        return result;
     }
+    LOG_ERROR("GetMidiMessage function pointer is NULL");
     return -1;
 }
 
 long VoicemeeterAPI::SendMidiMessage(unsigned char *buffer, long numBytes) {
     if (VBVMR_SendMidiMessage) {
-        return VBVMR_SendMidiMessage(buffer, numBytes);
+        long result = VBVMR_SendMidiMessage(buffer, numBytes);
+        LOG_DEBUG("SendMidiMessage " + std::string(result == 0 ? "succeeded" : "failed"));
+        return result;
     }
+    LOG_ERROR("SendMidiMessage function pointer is NULL");
     return -1;
 }
 
 long VoicemeeterAPI::GetParameterFloat(const char *param, float *value) {
     if (VBVMR_GetParameterFloat) {
         long result = VBVMR_GetParameterFloat(const_cast<char *>(param), value);
-        if (result == 0)  // Assuming 0 indicates success
-        {
-            Logger::Instance().Log(LogLevel::DEBUG,
-                                   std::string("GetParameterFloat succeeded for ") +
-                                       param +
-                                       " with value: " + std::to_string(*value));
+        if (result == 0) {
+            LOG_DEBUG("GetParameterFloat succeeded for " + std::string(param) +
+                " with value: " + std::to_string(*value));
         } else {
-            Logger::Instance().Log(
-                LogLevel::ERR, std::string("GetParameterFloat failed for ") + param +
-                                   " with error code: " + std::to_string(result));
+            LOG_ERROR("GetParameterFloat failed for " + std::string(param) +
+                " with error code: " + std::to_string(result));
         }
         return result;
-    } else {
-        Logger::Instance().Log(
-            LogLevel::ERR,
-            std::string("GetParameterFloat function pointer is NULL for ") + param);
-        return -1;
     }
+    LOG_ERROR("GetParameterFloat function pointer is NULL for " + std::string(param));
+    return -1;
 }
 
 long VoicemeeterAPI::SetParameterFloat(const char *param, float value) {
     if (VBVMR_SetParameterFloat) {
         long result = VBVMR_SetParameterFloat(const_cast<char *>(param), value);
         if (result == 0) {
-            Logger::Instance().Log(
-                LogLevel::DEBUG, std::string("SetParameterFloat succeeded for ") +
-                                     param + " with value: " + std::to_string(value));
+            LOG_DEBUG("SetParameterFloat succeeded for " + std::string(param) +
+                " with value: " + std::to_string(value));
         } else {
-            Logger::Instance().Log(
-                LogLevel::ERR, std::string("SetParameterFloat failed for ") + param +
-                                   " with error code: " + std::to_string(result));
+            LOG_ERROR("SetParameterFloat failed for " + std::string(param) +
+                " with error code: " + std::to_string(result));
         }
         return result;
-    } else {
-        Logger::Instance().Log(
-            LogLevel::ERR,
-            std::string("SetParameterFloat function pointer is NULL for ") + param);
-        return -1;
     }
+    LOG_ERROR("SetParameterFloat function pointer is NULL for " + std::string(param));
+    return -1;
 }
 
 long VoicemeeterAPI::SetParameters(const char *script) {
     if (VBVMR_SetParameters) {
         long result = VBVMR_SetParameters(const_cast<char *>(script));
         if (result == 0) {
-            Logger::Instance().Log(
-                LogLevel::DEBUG,
-                std::string("SetParameters succeeded with script: ") + script);
+            LOG_DEBUG(std::string("SetParameters succeeded with script: ") + script);
         } else {
-            Logger::Instance().Log(LogLevel::ERR,
-                                   std::string("SetParameters failed with script: ") +
-                                       script +
-                                       " with error code: " + std::to_string(result));
+            LOG_ERROR(std::string("SetParameters failed with script: ") + script +
+                " with error code: " + std::to_string(result));
         }
         return result;
     } else {
-        Logger::Instance().Log(
-            LogLevel::ERR,
-            std::string("SetParameters function pointer is NULL for script: ") +
-                script);
+        LOG_ERROR(std::string("SetParameters function pointer is NULL for script: ") + script);
         return -1;
     }
 }
@@ -392,9 +376,7 @@ long VoicemeeterAPI::Output_GetDeviceDescW(long zindex, long *nType,
                                            wszHardwareId);
     }
     return -1;
-}
-
-long VoicemeeterAPI::Input_GetDeviceNumber() {
+}long VoicemeeterAPI::Input_GetDeviceNumber() {
     if (VBVMR_Input_GetDeviceNumber) {
         return VBVMR_Input_GetDeviceNumber();
     }

@@ -89,9 +89,11 @@ void Logger::Log(LogLevel level, std::string_view message) {
     // Log level as string
     std::string levelStr;
     switch (level) {
+#ifndef NDEBUG
         case LogLevel::DEBUG:
             levelStr = "<DEBUG> ";
             break;
+#endif
         case LogLevel::INFO:
             levelStr = "<INFO> ";
             break;

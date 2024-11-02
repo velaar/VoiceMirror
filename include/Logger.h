@@ -19,6 +19,8 @@ enum class LogLevel {
     ERR       ///< Error events that might still allow the application to continue.
 };
 
+
+
 /**
  * @brief Logger class to handle logging with different levels.
  *
@@ -68,4 +70,16 @@ class Logger {
     bool fileLoggingEnabled;  ///< Flag indicating if file logging is enabled.
 };
 
+
+
 #endif  // LOGGER_H
+
+#ifdef _DEBUG
+    #define LOG_DEBUG(message) Logger::Instance().Log(LogLevel::DEBUG, message)
+#else
+    #define LOG_DEBUG(message)
+#endif
+
+#define LOG_INFO(message) Logger::Instance().Log(LogLevel::INFO, message)
+#define LOG_WARNING(message) Logger::Instance().Log(LogLevel::WARNING, message)
+#define LOG_ERROR(message) Logger::Instance().Log(LogLevel::ERR, message)

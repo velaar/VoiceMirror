@@ -8,7 +8,6 @@
 #include <mutex>
 #include <string>
 
-#include "COMUtilities.h"
 #include "VoicemeeterManager.h"
 #include "VolumeMirror.h"
 #include "ConfigParser.h"
@@ -46,7 +45,6 @@ class DeviceMonitor : public IMMNotificationClient {
     std::atomic<ULONG> refCount;
     std::mutex toggleMutex;
     bool isToggled;
-    bool debugMode;
 
     void CheckDevice(LPCWSTR deviceId, bool isAdded);
     void HandleDevicePluggedIn();

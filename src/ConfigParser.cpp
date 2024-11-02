@@ -1,14 +1,14 @@
 #include "ConfigParser.h"
-#include "Logger.h"
+
 #include <fstream>
 #include <sstream>
-#include <windows.h>
-#include "COMUtilities.h"
+
+#include "Logger.h"
 
 void ConfigParser::ParseConfigFile(const std::string& configPath, std::unordered_map<std::string, std::string>& configMap) {
     std::ifstream configFile(configPath);
     if (!configFile.is_open()) {
-        Logger::Instance().Log(LogLevel::INFO, "Config file not found: " + configPath + ". Continuing with command line flags.");
+        LOG_INFO("Config file not found: " + configPath + ". Continuing with command line flags.");
         return;
     }
 
@@ -84,6 +84,10 @@ void ConfigParser::ApplyConfig(const std::unordered_map<std::string, std::string
         } else if (key == "polling") {
             config.pollingEnabled = true;
             config.pollingInterval = std::stoi(value);
+        } else if (key == "startup_volume") {
+            config.startupVolumePercent = std::stoi(value);
+        } else if (key == "startup_sound") {
+            config.startupSound = (value == "true" || value == "1");
         }
     }
 }
@@ -93,6 +97,12 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
         int index = result["index"].as<int>();
         if (index < 0) {
             throw std::runtime_error("Channel index must be non-negative");
+        }
+    }
+    if (result.count("startup-volume")) {
+        int vol = result["startup-volume"].as<int>();
+        if (vol < 0 || vol > 100) {
+            throw std::runtime_error("Startup volume must be between 0 and 100.");
         }
     }
 
@@ -120,28 +130,8 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
 
 cxxopts::Options ConfigParser::CreateOptions() {
     cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
-    
-    options.add_options()
-        ("C,chime", "Enable chime sound on sync from Voicemeeter to Windows")
-        ("L,list-channels", "List all Voicemeeter channels with their labels and exit")
-        ("S,shutdown", "Shutdown all instances of the app and exit immediately")
-        ("H,hidden", "Hide the console window. Use with --log to run without showing the console.")
-        ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
-        ("M,list-monitor", "List monitorable audio devices and exit")
-        ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
-        ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>())
-        ("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())
-        ("d,debug", "Enable debug mode for extensive logging")
-        ("h,help", "Show help message and exit")
-        ("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>())
-        ("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>())
-        ("m,monitor", "Monitor a specific audio device by UUID and restart audio engine on plug/unplug events", cxxopts::value<std::string>())
-        ("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>())
-        ("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>())
-        ("p,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->implicit_value("100"))
-        ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())
-        ("v,version", "Show program's version number and exit");
+
+    options.add_options()("C,chime", "Enable chime sound on sync from Voicemeeter to Windows")("L,list-channels", "List all Voicemeeter channels with their labels and exit")("S,shutdown", "Shutdown all instances of the app and exit immediately")("H,hidden", "Hide the console window. Use with --log to run without showing the console.")("I,list-inputs", "List available Voicemeeter virtual inputs and exit")("M,list-monitor", "List monitorable audio devices and exit")("O,list-outputs", "List available Voicemeeter virtual outputs and exit")("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>())("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())("d,debug", "Enable debug mode for extensive logging")("h,help", "Show help message and exit")("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>())("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>())("m,monitor", "Monitor a specific audio device by UUID and restart audio engine on plug/unplug events", cxxopts::value<std::string>())("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>())("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>())("p,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->implicit_value("100"))("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>())("v,version", "Show program's version number and exit")("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", cxxopts::value<int>())("u,startup-sound", "Play a startup sound after setting the initial volume", cxxopts::value<bool>()->default_value("false"));
 
     return options;
 }
@@ -189,16 +179,23 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
         config.pollingEnabled = true;
         config.pollingInterval = result["polling"].as<int>();
     }
+    if (result.count("startup-volume")) {
+        config.startupVolumePercent = result["startup-volume"].as<int>();
+    }
+
+    if (result.count("startup-sound")) {
+        config.startupSound = result["startup-sound"].as<bool>();
+    }
 }
 
 bool ConfigParser::HandleSpecialCommands(const Config& config) {
     if (config.help) {
-        Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
+        LOG_INFO("Use --help to see available options.");
         return true;
     }
 
     if (config.version) {
-        Logger::Instance().Log(LogLevel::INFO, "VoiceMirror Version 0.2.0-alpha");
+        LOG_INFO("VoiceMirror Version 0.2.0-alpha");
         return true;
     }
 
@@ -208,19 +205,18 @@ bool ConfigParser::HandleSpecialCommands(const Config& config) {
         if (hQuitEvent) {
             bool signalResult = SetEvent(hQuitEvent.get());
             if (!signalResult) {
-                Logger::Instance().Log(LogLevel::ERR, "Failed to signal quit event to running instances.");
+                LOG_ERROR("Failed to signal quit event to running instances.");
                 return true;
             }
-            Logger::Instance().Log(LogLevel::INFO, "Signaled running instances to quit.");
+            LOG_INFO("Signaled running instances to quit.");
         } else {
-            Logger::Instance().Log(LogLevel::INFO, "No running instances found.");
+            LOG_INFO("No running instances found.");
         }
         return true;
     }
 
     return false;
 }
-
 void ConfigParser::ValidateToggleConfig(const Config& config) {
     if (!config.toggleParam.empty()) {
         if (config.monitorDeviceUUID.empty()) {
@@ -262,7 +258,7 @@ bool ConfigParser::SetupLogging(const Config& config) {
     }
 
     if (config.hideConsole && !config.loggingEnabled) {
-        Logger::Instance().Log(LogLevel::ERR, "--hidden option requires --log to be specified.");
+        LOG_ERROR("--hidden option requires --log to be specified.");
         return false;
     }
 
@@ -279,10 +275,10 @@ ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) 
     ToggleConfig config;
     size_t firstColon = toggleParam.find(':');
     size_t secondColon = toggleParam.find(':', firstColon + 1);
-    
+
     config.type = toggleParam.substr(0, firstColon);
     config.index1 = std::stoi(toggleParam.substr(firstColon + 1, secondColon - firstColon - 1));
     config.index2 = std::stoi(toggleParam.substr(secondColon + 1));
-    
+
     return config;
 }
