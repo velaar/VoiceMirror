@@ -74,6 +74,8 @@
         "mutex": "cpp",
         "fstream": "cpp",
         "codecvt": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "condition_variable": "cpp",
+        "functional": "cpp"
     },
 }

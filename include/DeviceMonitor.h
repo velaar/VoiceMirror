@@ -11,13 +11,7 @@
 #include "COMUtilities.h"
 #include "VoicemeeterManager.h"
 #include "VolumeMirror.h"
-
-// Structure to hold toggle configuration
-struct ToggleConfig {
-    std::string type;  // "input" or "output"
-    int index1;
-    int index2;
-};
+#include "ConfigParser.h"
 
 // DeviceMonitor class to monitor audio device changes using Device UUID
 class DeviceMonitor : public IMMNotificationClient {

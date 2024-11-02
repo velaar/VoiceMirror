@@ -1,8 +1,9 @@
-
 #include "ConfigParser.h"
 #include "Logger.h"
 #include <fstream>
 #include <sstream>
+#include <windows.h>
+#include "COMUtilities.h"
 
 void ConfigParser::ParseConfigFile(const std::string& configPath, std::unordered_map<std::string, std::string>& configMap) {
     std::ifstream configFile(configPath);
@@ -188,4 +189,100 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
         config.pollingEnabled = true;
         config.pollingInterval = result["polling"].as<int>();
     }
+}
+
+bool ConfigParser::HandleSpecialCommands(const Config& config) {
+    if (config.help) {
+        Logger::Instance().Log(LogLevel::INFO, "Use --help to see available options.");
+        return true;
+    }
+
+    if (config.version) {
+        Logger::Instance().Log(LogLevel::INFO, "VoiceMirror Version 0.2.0-alpha");
+        return true;
+    }
+
+    if (config.shutdown) {
+        HANDLE hEvent = OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME);
+        UniqueHandle hQuitEvent(hEvent);
+        if (hQuitEvent) {
+            bool signalResult = SetEvent(hQuitEvent.get());
+            if (!signalResult) {
+                Logger::Instance().Log(LogLevel::ERR, "Failed to signal quit event to running instances.");
+                return true;
+            }
+            Logger::Instance().Log(LogLevel::INFO, "Signaled running instances to quit.");
+        } else {
+            Logger::Instance().Log(LogLevel::INFO, "No running instances found.");
+        }
+        return true;
+    }
+
+    return false;
+}
+
+void ConfigParser::ValidateToggleConfig(const Config& config) {
+    if (!config.toggleParam.empty()) {
+        if (config.monitorDeviceUUID.empty()) {
+            throw std::runtime_error("--toggle parameter requires --monitor to be specified.");
+        }
+
+        std::string toggleParam = config.toggleParam;
+        size_t firstColon = toggleParam.find(':');
+        size_t secondColon = toggleParam.find(':', firstColon + 1);
+
+        if (firstColon == std::string::npos || secondColon == std::string::npos) {
+            throw std::runtime_error("Invalid --toggle format. Expected format: type:index1:index2 (e.g., input:0:1)");
+        }
+
+        std::string type = toggleParam.substr(0, firstColon);
+        if (type != "input" && type != "output") {
+            throw std::runtime_error("Invalid toggle type: " + type + ". Use 'input' or 'output'.");
+        }
+
+        try {
+            int index1 = std::stoi(toggleParam.substr(firstColon + 1, secondColon - firstColon - 1));
+            int index2 = std::stoi(toggleParam.substr(secondColon + 1));
+            // Additional validation can be added here
+        } catch (const std::exception& ex) {
+            throw std::runtime_error("Invalid indices in --toggle parameter: " + std::string(ex.what()));
+        }
+    }
+}
+
+bool ConfigParser::SetupLogging(const Config& config) {
+    if (config.debug) {
+        Logger::Instance().SetLogLevel(LogLevel::DEBUG);
+    } else {
+        Logger::Instance().SetLogLevel(LogLevel::INFO);
+    }
+
+    if (config.loggingEnabled) {
+        Logger::Instance().EnableFileLogging(config.logFilePath);
+    }
+
+    if (config.hideConsole && !config.loggingEnabled) {
+        Logger::Instance().Log(LogLevel::ERR, "--hidden option requires --log to be specified.");
+        return false;
+    }
+
+    return true;
+}
+
+void ConfigParser::HandleConfiguration(const std::string& configPath, Config& config) {
+    std::unordered_map<std::string, std::string> configMap;
+    ParseConfigFile(configPath, configMap);
+    ApplyConfig(configMap, config);
+}
+
+ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) {
+    ToggleConfig config;
+    size_t firstColon = toggleParam.find(':');
+    size_t secondColon = toggleParam.find(':', firstColon + 1);
+    
+    config.type = toggleParam.substr(0, firstColon);
+    config.index1 = std::stoi(toggleParam.substr(firstColon + 1, secondColon - firstColon - 1));
+    config.index2 = std::stoi(toggleParam.substr(secondColon + 1));
+    
+    return config;
 }
