@@ -17,6 +17,8 @@
 #include "VolumeUtils.h"
 #include "VoicemeeterManager.h"
 
+using Microsoft::WRL::ComPtr;
+
 // Constructor
 VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float minDbmVal,
                            float maxDbmVal, VoicemeeterManager &manager,
@@ -39,6 +41,11 @@ VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float 
       pollingInterval(100),
       lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(110)),
       debounceDuration(500) {
+
+    // **Invoke COM Initialization via VoicemeeterManager**
+    if (!vmManager.InitializeCOM()) {
+        throw std::runtime_error("COM initialization failed via VoicemeeterManager.");
+    }
 
     HRESULT hr;
 
@@ -242,31 +249,30 @@ void VolumeMirror::MonitorVoicemeeter() {
             float vmVolume = vmManager.GetChannelVolume(channelIndex, channelType);
             bool vmMute = vmManager.IsChannelMuted(channelIndex, channelType);
 
-            if (vmVolume >= 0.0f) { // Valid volume retrieved
-                if (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute) {
-                    lastVmVolume = vmVolume;
-                    lastVmMute = vmMute;
+            if (vmVolume >= 0.0f && 
+                (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute)) {
+                lastVmVolume = vmVolume;
+                lastVmMute = vmMute;
 
-                    // Update Windows volume accordingly
-                    ignoreWindowsChange = true;
-                    UpdateWindowsVolume(vmVolume, vmMute);
-                    ignoreWindowsChange = false;
+                // Update Windows volume accordingly
+                ignoreWindowsChange = true;
+                UpdateWindowsVolume(vmVolume, vmMute);
+                ignoreWindowsChange = false;
 
-                    // Mark that a change has occurred and reset the timer
-                    lastVmChangeTime = std::chrono::steady_clock::now();
-                    pendingSound = true;
+                // Mark that a change has occurred and reset the timer
+                lastVmChangeTime = std::chrono::steady_clock::now();
+                pendingSound = true;
 
-                    LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
-                }
+                LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
             }
         }
 
         // Check if the debounce period has passed since the last change
         if (pendingSound) {
             auto now = std::chrono::steady_clock::now();
-            auto timeSinceLastChange = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastVmChangeTime);
+            auto durationSinceLastChange = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastVmChangeTime);
 
-            if (timeSinceLastChange >= debounceDuration) {
+            if (durationSinceLastChange >= debounceDuration) {
                 LOG_DEBUG("Playing sync sound after debounce period");
                 if (playSoundOnSync) {
                     PlaySyncSound();

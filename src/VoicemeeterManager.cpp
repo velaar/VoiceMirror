@@ -42,7 +42,19 @@ VoicemeeterManager::~VoicemeeterManager() {
  *
  * @return True if COM was successfully initialized or already initialized, false otherwise.
  */
+// VoicemeeterManager.cpp
+
+#include "VoicemeeterManager.h"
+#include "VolumeUtils.h"
+#include "Logger.h"
+
+#include <mutex>
+
+std::mutex comInitMutex;  // Global mutex for COM initialization
+
 bool VoicemeeterManager::InitializeCOM() {
+    std::lock_guard<std::mutex> lock(comInitMutex); // Ensure thread safety
+
     if (!comInitialized) {
         HRESULT hr = CoInitializeEx(
             nullptr, 

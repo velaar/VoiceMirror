@@ -38,6 +38,10 @@ public:
     bool InitializeVoicemeeterState(int channelIndex, VolumeUtils::ChannelType channelType);
     float GetChannelVolume(int channelIndex, VolumeUtils::ChannelType channelType);
     bool IsChannelMuted(int channelIndex, VolumeUtils::ChannelType channelType);
+    
+    // COM initialization methods
+    bool InitializeCOM();
+    void UninitializeCOM();
 
 private:
     VoicemeeterAPI vmrAPI;
@@ -46,9 +50,7 @@ private:
     bool comInitialized;
     std::mutex toggleMutex;
 
-    // COM initialization methods
-    bool InitializeCOM();
-    void UninitializeCOM();
+
 
     // Channel states
     std::unordered_map<int, ChannelState> channelStates;
