@@ -1,64 +1,80 @@
-#pragma once
+// ConfigParser.h
 
-#include <unordered_map>
-#include <memory>
+#ifndef CONFIGPARSER_H
+#define CONFIGPARSER_H
+
 #include <string>
-#include <windows.h>
-#include "Defconf.h"
+#include "Logger.h"
 #include "cxxopts.hpp"
+#include "Defconf.h"
 
-// Struct to hold toggle configuration parameters
+/**
+ * @brief Structure to hold toggle configuration parameters.
+ */
 struct ToggleConfig {
-    std::string type;
-    int index1;
-    int index2;
+    std::string type; ///< Type of channel ('input' or 'output').
+    int index1;       ///< First channel index.
+    int index2;       ///< Second channel index.
 };
 
-// Custom deleter for HANDLE to ensure proper resource management
-struct HandleDeleter {
-    void operator()(HANDLE handle) const {
-        if (handle && handle != INVALID_HANDLE_VALUE) {
-            CloseHandle(handle);
-        }
-    }
-};
-
-// Alias for a unique_ptr managing HANDLEs with the custom deleter
-using UniqueHandle = std::unique_ptr<std::remove_pointer<HANDLE>::type, HandleDeleter>;
-
-// Forward declaration of Config structure
-struct Config;
-
-// ConfigParser class responsible for parsing and applying configurations
+/**
+ * @brief Class responsible for parsing and validating configuration.
+ */
 class ConfigParser {
 public:
-    // Parses the configuration file and populates the config map
-    static void ParseConfigFile(const std::string& configPath, std::unordered_map<std::string, std::string>& configMap);
+    /**
+     * @brief Parse the configuration file and populate the Config structure directly.
+     * @param configPath Path to the configuration file.
+     * @param config Reference to the Config structure to populate.
+     */
+    static void ParseConfigFile(const std::string& configPath, Config& config);
 
-    // Applies the configuration map to the Config structure
-    static void ApplyConfig(const std::unordered_map<std::string, std::string>& configMap, Config& config);
-
-    // Validates the parsed command-line options
+    /**
+     * @brief Validate command-line options.
+     * @param result The parsed command-line options.
+     */
     static void ValidateOptions(const cxxopts::ParseResult& result);
 
-    // Creates and returns the command-line options
+    /**
+     * @brief Create and return the cxxopts::Options object.
+     * @return Configured cxxopts::Options object.
+     */
     static cxxopts::Options CreateOptions();
 
-    // Applies the parsed command-line options to the Config structure
+    /**
+     * @brief Apply command-line options directly to the Config structure.
+     * @param result The parsed command-line options.
+     * @param config Reference to the Config structure to populate.
+     */
     static void ApplyCommandLineOptions(const cxxopts::ParseResult& result, Config& config);
 
-    // Handles special commands like help, version, and shutdown
+    /**
+     * @brief Handle special commands like --help, --version, --shutdown.
+     * @param config The current configuration.
+     * @return True if a special command was handled and the program should exit, false otherwise.
+     */
     static bool HandleSpecialCommands(const Config& config);
 
-    // Validates the toggle configuration parameters
-    static void ValidateToggleConfig(const Config& config);
-
-    // Sets up logging based on the configuration
-    static bool SetupLogging(const Config& config);
-
-    // Handles the overall configuration by parsing the config file and applying settings
+    /**
+     * @brief Handle the overall configuration parsing.
+     * @param configPath Path to the configuration file.
+     * @param config Reference to the Config structure to populate.
+     */
     static void HandleConfiguration(const std::string& configPath, Config& config);
 
-    // Parses the toggle parameter into a ToggleConfig structure
+    /**
+     * @brief Parse the toggle parameter.
+     * @param toggleParam The toggle parameter string.
+     * @return Parsed ToggleConfig structure.
+     */
     static ToggleConfig ParseToggleParameter(const std::string& toggleParam);
+
+    /**
+     * @brief Setup the Logger based on the configuration.
+     * @param config The current configuration.
+     * @return True if Logger setup was successful, false otherwise.
+     */
+    static bool SetupLogging(const Config& config);
 };
+
+#endif // CONFIGPARSER_H

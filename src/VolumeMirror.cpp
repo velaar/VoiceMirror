@@ -5,7 +5,6 @@
 #include <sapi.h>  // For PlaySound
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
-#include <wrl/client.h>
 
 #include <atomic>
 #include <chrono>
@@ -42,12 +41,11 @@ VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float 
       lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(110)),
       debounceDuration(500) {
 
-    // **Invoke COM Initialization via VoicemeeterManager**
-    if (!vmManager.InitializeCOM()) {
-        throw std::runtime_error("COM initialization failed via VoicemeeterManager.");
-    }
 
-    HRESULT hr;
+    HRESULT hr = CoCreateGuid(&eventContextGuid);
+    if (FAILED(hr)) {
+        throw std::runtime_error("Failed to create event context GUID.");
+    }
 
     // Initialize Windows Audio Components
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER,
@@ -203,10 +201,10 @@ VolumeMirror::Release() {
 // OnNotify implementation - called when Windows volume changes
 STDMETHODIMP VolumeMirror::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
     // Check if the volume change originated from our own process
-    if (pNotify->guidEventContext == eventContextGuid) {
-        LOG_DEBUG("Ignored volume change notification from our own process.");
-        return S_OK;
-    }
+    //if (pNotify->guidEventContext == eventContextGuid) {
+    //    LOG_DEBUG("Ignored volume change notification from our own process.");
+    //    return S_OK;
+    //}
 
     if (ignoreWindowsChange)
         return S_OK;
@@ -244,10 +242,12 @@ void VolumeMirror::MonitorVoicemeeter() {
             continue;
 
         if (vmManager.IsParametersDirty()) {
+            
             std::lock_guard<std::mutex> lock(vmMutex);
 
             float vmVolume = vmManager.GetChannelVolume(channelIndex, channelType);
             bool vmMute = vmManager.IsChannelMuted(channelIndex, channelType);
+            LOG_DEBUG("Voicemeeter volume: " + std::to_string(vmVolume) + ", mute: " + std::to_string(vmMute));
 
             if (vmVolume >= 0.0f && 
                 (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute)) {

@@ -19,3 +19,4 @@ vcpkg*
 *.vsix
 git_stats.py
 Desktop.ini
+TODO.md

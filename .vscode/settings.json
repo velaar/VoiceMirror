@@ -76,6 +76,11 @@
         "codecvt": "cpp",
         "filesystem": "cpp",
         "condition_variable": "cpp",
-        "functional": "cpp"
+        "functional": "cpp",
+        "array": "cpp",
+        "deque": "cpp",
+        "queue": "cpp",
+        "ranges": "cpp",
+        "span": "cpp"
     },
 }

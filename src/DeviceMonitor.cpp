@@ -2,9 +2,7 @@
 #include "DeviceMonitor.h"
 #include <windows.h>
 #include <chrono>
-#include <stdexcept>
 #include "Logger.h"
-#include <Functiondiscoverykeys_devpkey.h>
 
 
 DeviceMonitor::DeviceMonitor(const std::string &deviceUUID,
@@ -16,10 +14,9 @@ DeviceMonitor::DeviceMonitor(const std::string &deviceUUID,
       volumeMirror(mirror),
       refCount(1),
       isToggled(false) {
+        HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                    IID_PPV_ARGS(&deviceEnumerator));
 
-    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
-                                  __uuidof(IMMDeviceEnumerator),
-                                  (void **)&deviceEnumerator);
     if (FAILED(hr)) {
         throw std::runtime_error(
             "Failed to create MMDeviceEnumerator for DeviceMonitor.");
@@ -68,13 +65,12 @@ DeviceMonitor::Release() {
     return count;
 }
 
-STDMETHODIMP DeviceMonitor::OnDeviceStateChanged(LPCWSTR pwstrDeviceId,
-                                                 DWORD dwNewState) {
+STDMETHODIMP DeviceMonitor::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) {
     LOG_DEBUG("OnDeviceStateChanged called for Device ID: " + std::to_string(dwNewState));
 
-    if (dwNewState == 1) {
+    if (dwNewState == DEVICE_STATE_ACTIVE) { // Assuming 1 corresponds to DEVICE_STATE_ACTIVE
         CheckDevice(pwstrDeviceId, true);
-    } else if (dwNewState == 4) {
+    } else if (dwNewState == DEVICE_STATE_DISABLED) { // Assuming 4 corresponds to DEVICE_STATE_DISABLED
         CheckDevice(pwstrDeviceId, false);
     }
     return S_OK;
@@ -149,40 +145,34 @@ void DeviceMonitor::HandleDeviceUnplugged() {
     }
 }
 
-void DeviceMonitor::ToggleMute(const std::string &type, int index1, int index2,
-                               bool isPluggedIn) {
-    std::string muteParam1, muteParam2;
+void DeviceMonitor::ToggleMute(const std::string &type, int index1, int index2, bool isPluggedIn) {
+    VolumeUtils::ChannelType channelType;
 
     if (type == "input") {
-        muteParam1 = "Strip[" + std::to_string(index1) + "].Mute";
-        muteParam2 = "Strip[" + std::to_string(index2) + "].Mute";
-    } else if (type == "output") {
-        muteParam1 = "Bus[" + std::to_string(index1) + "].Mute";
-        muteParam2 = "Bus[" + std::to_string(index2) + "].Mute";
-    } else {
+        channelType = VolumeUtils::ChannelType::Input;
+    }
+    else if (type == "output") {
+        channelType = VolumeUtils::ChannelType::Output;
+    }
+    else {
         LOG_ERROR("Invalid toggle type: " + type);
         return;
     }
 
     if (isPluggedIn) {
         // On device plug, unmute index1 and mute index2
-        voicemeeterManager.GetAPI().SetParameterFloat(muteParam1.c_str(),
-                                                      0.0f);  // Unmute index1
-        voicemeeterManager.GetAPI().SetParameterFloat(muteParam2.c_str(),
-                                                      1.0f);  // Mute index2
+        voicemeeterManager.SetMute(index1, channelType, false); // Unmute index1
+        voicemeeterManager.SetMute(index2, channelType, true);  // Mute index2
         LOG_INFO("Device Plugged: Unmuted " + type + ":" + std::to_string(index1) +
-                                                   ", Muted " + type + ":" +
-                                                   std::to_string(index2));
+                 ", Muted " + type + ":" + std::to_string(index2));
         isToggled = true;
-    } else {
+    }
+    else {
         // On device unplug, mute index1 and unmute index2
-        voicemeeterManager.GetAPI().SetParameterFloat(muteParam1.c_str(),
-                                                      1.0f);  // Mute index1
-        voicemeeterManager.GetAPI().SetParameterFloat(muteParam2.c_str(),
-                                                      0.0f);  // Unmute index2
+        voicemeeterManager.SetMute(index1, channelType, true);  // Mute index1
+        voicemeeterManager.SetMute(index2, channelType, false); // Unmute index2
         LOG_INFO("Device Unplugged: Muted " + type + ":" + std::to_string(index1) +
-                                                   ", Unmuted " + type + ":" +
-                                                   std::to_string(index2));
+                 ", Unmuted " + type + ":" + std::to_string(index2));
         isToggled = false;
     }
 }
