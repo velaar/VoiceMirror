@@ -2,8 +2,116 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Clean, Configure, and Build All",
+            "type": "cmake",
+            "label": "CMake: Configure x86 Debug",
+            "command": "configure",
+            "preset": "win-debug-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Configure the project using the x86 Debug preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Configure x86 Release",
+            "command": "configure",
+            "preset": "win-release-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Configure the project using the x86 Release preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Configure x64 Debug",
+            "command": "configure",
+            "preset": "win-debug-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Configure the project using the x64 Debug preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Configure x64 Release",
+            "command": "configure",
+            "preset": "win-release-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Configure the project using the x64 Release preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Build x86 Debug",
+            "command": "build",
+            "preset": "win-debug-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Build the project using the x86 Debug preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Build x86 Release",
+            "command": "build",
+            "preset": "win-release-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Build the project using the x86 Release preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Build x64 Debug",
+            "command": "build",
+            "preset": "win-debug-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Build the project using the x64 Debug preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Build x64 Release",
+            "command": "build",
+            "preset": "win-release-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Build the project using the x64 Release preset."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Clean x86 Debug",
+            "command": "clean",
+            "preset": "win-debug-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Clean the x86 Debug build."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Clean x86 Release",
+            "command": "clean",
+            "preset": "win-release-x86",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Clean the x86 Release build."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Clean x64 Debug",
+            "command": "clean",
+            "preset": "win-debug-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Clean the x64 Debug build."
+        },
+        {
+            "type": "cmake",
+            "label": "CMake: Clean x64 Release",
+            "command": "clean",
+            "preset": "win-release-x64",
+            "group": "build",
+            "problemMatcher": [],
+            "detail": "Clean the x64 Release build."
+        },
+        {
             "type": "shell",
+            "label": "Clean, Configure, and Build All",
             "command": "powershell",
             "args": [
                 "-NoProfile",
@@ -11,41 +119,25 @@
                 "Bypass",
                 "-Command",
                 "& {",
-                "    # Define build directories",
-                "    $buildDirs = @(",
-                "        'build\\win-release-x64',",
-                "        'build\\win-debug-x64',",
-                "        'build\\win-release-x86',",
-                "        'build\\win-debug-x86'",
-                "    );",
-                "",
-                "    # Remove each build directory if it exists",
-                "    foreach ($dir in $buildDirs) {",
-                "        if (Test-Path $dir) {",
-                "            Remove-Item -Recurse -Force $dir",
-                "            Write-Host \"Removed directory: $dir\"",
-                "        } else {",
-                "            Write-Host \"Directory does not exist, skipping: $dir\"",
-                "        }",
-                "    }",
-                "",
-                "    # Define presets",
                 "    $presets = @(",
                 "        'win-release-x64',",
                 "        'win-debug-x64',",
                 "        'win-release-x86',",
                 "        'win-debug-x86'",
                 "    );",
-                "",
-                "    # Configure and build each preset",
                 "    foreach ($preset in $presets) {",
+                "        Write-Host \"Cleaning preset: $preset\"",
+                "        cmake --build --preset $preset --target clean",
+                "        if ($LASTEXITCODE -ne 0) {",
+                "            Write-Host \"Clean failed for preset: $preset\" -ForegroundColor Red",
+                "            exit $LASTEXITCODE",
+                "        }",
                 "        Write-Host \"Configuring preset: $preset\"",
                 "        cmake --preset $preset",
                 "        if ($LASTEXITCODE -ne 0) {",
                 "            Write-Host \"Configuration failed for preset: $preset\" -ForegroundColor Red",
                 "            exit $LASTEXITCODE",
                 "        }",
-                "",
                 "        Write-Host \"Building preset: $preset\"",
                 "        cmake --build --preset $preset",
                 "        if ($LASTEXITCODE -ne 0) {",
@@ -53,18 +145,17 @@
                 "            exit $LASTEXITCODE",
                 "        }",
                 "    }",
-                "",
                 "    Write-Host \"All configurations built successfully.\" -ForegroundColor Green",
                 "}"
             ],
             "group": "build",
+            "problemMatcher": [],
             "presentation": {
                 "reveal": "always",
                 "panel": "shared",
                 "showReuseMessage": true,
                 "clear": false
-            },
-            "problemMatcher": []
+            }
         }
     ]
 }

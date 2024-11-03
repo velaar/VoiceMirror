@@ -34,7 +34,6 @@ constexpr int DEFAULT_POLLING_INTERVAL_MS = 100;                   // Default po
 constexpr int MAX_RETRIES = 20;                                     // Maximum number of connection attempts
 constexpr int RETRY_DELAY_MS = 1000;                                // Delay between connection attempts (milliseconds)
 
-
 // -----------------------------
 // Chime Settings
 // -----------------------------

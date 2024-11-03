@@ -2,16 +2,17 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Launch Debug",
-            "type": "cppvsdbg",
+            "name": "(gdb) Launch x86 Debug",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${cmake.launchTargetPath}",
+            "program": "${command:cmake.launchTargetPath}",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "preLaunchTask": "CMake Build Debug",
-            "miDebuggerPath": "", // Not needed for MSVC
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/usr/bin/gdb.exe",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -19,21 +20,21 @@
                     "ignoreFailures": true
                 }
             ],
-            "logging": {
-                "moduleLoad": false
-            }
+            "preLaunchTask": "CMake: Build x86 Debug",
+            "internalConsoleOptions": "openOnSessionStart"
         },
         {
-            "name": "Launch Release",
-            "type": "cppvsdbg",
+            "name": "(gdb) Launch x86 Release",
+            "type": "cppdbg",
             "request": "launch",
-            "program": "${cmake.launchTargetPath}",
+            "program": "${command:cmake.launchTargetPath}",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "preLaunchTask": "CMake Build Release",
-            "miDebuggerPath": "", // Not needed for MSVC
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/usr/bin/gdb.exe",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -41,9 +42,52 @@
                     "ignoreFailures": true
                 }
             ],
-            "logging": {
-                "moduleLoad": false
-            }
+            "preLaunchTask": "CMake: Build x86 Release",
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "name": "(gdb) Launch x64 Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/usr/bin/gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake: Build x64 Debug",
+            "internalConsoleOptions": "openOnSessionStart"
+        },
+        {
+            "name": "(gdb) Launch x64 Release",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${command:cmake.launchTargetPath}",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": true,
+            "MIMode": "gdb",
+            "miDebuggerPath": "C:/msys64/usr/bin/gdb.exe",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "preLaunchTask": "CMake: Build x64 Release",
+            "internalConsoleOptions": "openOnSessionStart"
         }
     ]
 }
