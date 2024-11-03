@@ -6,8 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-
-#include "defconf.h"
+#include "Defconf.h"
 
 // Constructor
 VoicemeeterManager::VoicemeeterManager()
@@ -21,10 +20,9 @@ VoicemeeterManager::VoicemeeterManager()
       VBVMR_GetParameterFloat(nullptr),
       VBVMR_GetParameterStringA(nullptr),
       VBVMR_GetParameterStringW(nullptr),
-      VBVMR_GetLevel(nullptr),
+      /* VBVMR_GetLevel(nullptr),
       VBVMR_GetMidiMessage(nullptr),
       VBVMR_SendMidiMessage(nullptr),
-      VBVMR_SetParameterFloat(nullptr),
       VBVMR_SetParameters(nullptr),
       VBVMR_SetParametersW(nullptr),
       VBVMR_SetParameterStringA(nullptr),
@@ -34,14 +32,14 @@ VoicemeeterManager::VoicemeeterManager()
       VBVMR_Output_GetDeviceDescW(nullptr),
       VBVMR_Input_GetDeviceNumber(nullptr),
       VBVMR_Input_GetDeviceDescA(nullptr),
-      VBVMR_Input_GetDeviceDescW(nullptr),
-      VBVMR_AudioCallbackRegister(nullptr),
+      VBVMR_Input_GetDeviceDescW(nullptr), */
+      /* VBVMR_AudioCallbackRegister(nullptr),
       VBVMR_AudioCallbackStart(nullptr),
       VBVMR_AudioCallbackStop(nullptr),
-      VBVMR_AudioCallbackUnregister(nullptr),
-      VBVMR_MacroButton_IsDirty(nullptr),
+      VBVMR_AudioCallbackUnregister(nullptr), */
+      /* VBVMR_MacroButton_IsDirty(nullptr),
       VBVMR_MacroButton_GetStatus(nullptr),
-      VBVMR_MacroButton_SetStatus(nullptr),
+      VBVMR_MacroButton_SetStatus(nullptr), */
       initialized(false),
       loggedIn(false),
       debugMode(false),
@@ -50,27 +48,29 @@ VoicemeeterManager::VoicemeeterManager()
 // Destructor
 VoicemeeterManager::~VoicemeeterManager() {
     Shutdown();
+    UninitializeCOM();
 }
 
 // Initialize COM library
 bool VoicemeeterManager::InitializeCOM() {
-    std::lock_guard<std::mutex> lock(comInitMutex);  // Ensure thread safety
+    std::lock_guard<std::mutex> lock(comInitMutex);
 
     if (!comInitialized) {
-        HRESULT hr = CoInitializeEx(
-            nullptr,
-            COINIT_APARTMENTTHREADED  // Use apartment-threaded model
-        );
-        if (hr == RPC_E_CHANGED_MODE) {
-            LOG_WARNING("COM library already initialized with a different threading model.");
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        
+        if (SUCCEEDED(hr)) {
             comInitialized = true;
+            LOG_DEBUG("COM library initialized successfully.");
             return true;
-        } else if (FAILED(hr)) {
+        }
+        else if (hr == RPC_E_CHANGED_MODE) {
+            LOG_DEBUG("COM already initialized with different threading model.");
+            return true;
+        }
+        else {
             LOG_ERROR("Failed to initialize COM library. HRESULT: " + std::to_string(hr));
             return false;
         }
-        comInitialized = true;
-        LOG_DEBUG("COM library initialized successfully.");
     }
     return true;
 }
@@ -117,10 +117,9 @@ bool VoicemeeterManager::LoadVoicemeeterRemote() {
     VBVMR_GetParameterFloat = (T_VBVMR_GetParameterFloat)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetParameterFloat");
     VBVMR_GetParameterStringA = (T_VBVMR_GetParameterStringA)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetParameterStringA");
     VBVMR_GetParameterStringW = (T_VBVMR_GetParameterStringW)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetParameterStringW");
-    VBVMR_GetLevel = (T_VBVMR_GetLevel)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetLevel");
+    /* VBVMR_GetLevel = (T_VBVMR_GetLevel)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetLevel");
     VBVMR_GetMidiMessage = (T_VBVMR_GetMidiMessage)GetProcAddress(hVoicemeeterRemote, "VBVMR_GetMidiMessage");
     VBVMR_SendMidiMessage = (T_VBVMR_SendMidiMessage)GetProcAddress(hVoicemeeterRemote, "VBVMR_SendMidiMessage");
-    VBVMR_SetParameterFloat = (T_VBVMR_SetParameterFloat)GetProcAddress(hVoicemeeterRemote, "VBVMR_SetParameterFloat");
     VBVMR_SetParameters = (T_VBVMR_SetParameters)GetProcAddress(hVoicemeeterRemote, "VBVMR_SetParameters");
     VBVMR_SetParametersW = (T_VBVMR_SetParametersW)GetProcAddress(hVoicemeeterRemote, "VBVMR_SetParametersW");
     VBVMR_SetParameterStringA = (T_VBVMR_SetParameterStringA)GetProcAddress(hVoicemeeterRemote, "VBVMR_SetParameterStringA");
@@ -130,30 +129,19 @@ bool VoicemeeterManager::LoadVoicemeeterRemote() {
     VBVMR_Output_GetDeviceDescW = (T_VBVMR_Output_GetDeviceDescW)GetProcAddress(hVoicemeeterRemote, "VBVMR_Output_GetDeviceDescW");
     VBVMR_Input_GetDeviceNumber = (T_VBVMR_Input_GetDeviceNumber)GetProcAddress(hVoicemeeterRemote, "VBVMR_Input_GetDeviceNumber");
     VBVMR_Input_GetDeviceDescA = (T_VBVMR_Input_GetDeviceDescA)GetProcAddress(hVoicemeeterRemote, "VBVMR_Input_GetDeviceDescA");
-    VBVMR_Input_GetDeviceDescW = (T_VBVMR_Input_GetDeviceDescW)GetProcAddress(hVoicemeeterRemote, "VBVMR_Input_GetDeviceDescW");
-    VBVMR_AudioCallbackRegister = (T_VBVMR_AudioCallbackRegister)GetProcAddress(hVoicemeeterRemote, "VBVMR_AudioCallbackRegister");
-    VBVMR_AudioCallbackStart = (T_VBVMR_AudioCallbackStart)GetProcAddress(hVoicemeeterRemote, "VBVMR_AudioCallbackStart");
-    VBVMR_AudioCallbackStop = (T_VBVMR_AudioCallbackStop)GetProcAddress(hVoicemeeterRemote, "VBVMR_AudioCallbackStop");
-    VBVMR_AudioCallbackUnregister = (T_VBVMR_AudioCallbackUnregister)GetProcAddress(hVoicemeeterRemote, "VBVMR_AudioCallbackUnregister");
-    VBVMR_MacroButton_IsDirty = (T_VBVMR_MacroButton_IsDirty)GetProcAddress(hVoicemeeterRemote, "VBVMR_MacroButton_IsDirty");
-    VBVMR_MacroButton_GetStatus = (T_VBVMR_MacroButton_GetStatus)GetProcAddress(hVoicemeeterRemote, "VBVMR_MacroButton_GetStatus");
-    VBVMR_MacroButton_SetStatus = (T_VBVMR_MacroButton_SetStatus)GetProcAddress(hVoicemeeterRemote, "VBVMR_MacroButton_SetStatus");
+    VBVMR_Input_GetDeviceDescW = (T_VBVMR_Input_GetDeviceDescW)GetProcAddress(hVoicemeeterRemote, "VBVMR_Input_GetDeviceDescW"); */
 
     // Verify all required functions are loaded
     if (!VBVMR_Login || !VBVMR_Logout || !VBVMR_RunVoicemeeter ||
         !VBVMR_GetVoicemeeterType || !VBVMR_GetVoicemeeterVersion ||
         !VBVMR_IsParametersDirty || !VBVMR_GetParameterFloat ||
-        !VBVMR_GetParameterStringA || !VBVMR_GetParameterStringW ||
+        !VBVMR_GetParameterStringA || !VBVMR_GetParameterStringW /* ||
         !VBVMR_GetLevel || !VBVMR_GetMidiMessage || !VBVMR_SendMidiMessage ||
-        !VBVMR_SetParameterFloat || !VBVMR_SetParameters ||
-        !VBVMR_SetParametersW || !VBVMR_SetParameterStringA ||
+        !VBVMR_SetParameters || !VBVMR_SetParametersW || !VBVMR_SetParameterStringA ||
         !VBVMR_SetParameterStringW || !VBVMR_Output_GetDeviceNumber ||
         !VBVMR_Output_GetDeviceDescA || !VBVMR_Output_GetDeviceDescW ||
         !VBVMR_Input_GetDeviceNumber || !VBVMR_Input_GetDeviceDescA ||
-        !VBVMR_Input_GetDeviceDescW || !VBVMR_AudioCallbackRegister ||
-        !VBVMR_AudioCallbackStart || !VBVMR_AudioCallbackStop ||
-        !VBVMR_AudioCallbackUnregister || !VBVMR_MacroButton_IsDirty ||
-        !VBVMR_MacroButton_GetStatus || !VBVMR_MacroButton_SetStatus) {
+        !VBVMR_Input_GetDeviceDescW */) {
         LOG_ERROR("Failed to retrieve all required function pointers from VoicemeeterRemote DLL.");
         UnloadVoicemeeterRemote();
         return false;
@@ -172,7 +160,7 @@ void VoicemeeterManager::UnloadVoicemeeterRemote() {
         LOG_DEBUG("VoicemeeterRemote DLL unloaded.");
     }
 
-    // Reset all function pointers
+    // Reset all used function pointers
     VBVMR_Login = nullptr;
     VBVMR_Logout = nullptr;
     VBVMR_RunVoicemeeter = nullptr;
@@ -182,10 +170,9 @@ void VoicemeeterManager::UnloadVoicemeeterRemote() {
     VBVMR_GetParameterFloat = nullptr;
     VBVMR_GetParameterStringA = nullptr;
     VBVMR_GetParameterStringW = nullptr;
-    VBVMR_GetLevel = nullptr;
+    /* VBVMR_GetLevel = nullptr;
     VBVMR_GetMidiMessage = nullptr;
     VBVMR_SendMidiMessage = nullptr;
-    VBVMR_SetParameterFloat = nullptr;
     VBVMR_SetParameters = nullptr;
     VBVMR_SetParametersW = nullptr;
     VBVMR_SetParameterStringA = nullptr;
@@ -195,14 +182,16 @@ void VoicemeeterManager::UnloadVoicemeeterRemote() {
     VBVMR_Output_GetDeviceDescW = nullptr;
     VBVMR_Input_GetDeviceNumber = nullptr;
     VBVMR_Input_GetDeviceDescA = nullptr;
-    VBVMR_Input_GetDeviceDescW = nullptr;
-    VBVMR_AudioCallbackRegister = nullptr;
+    VBVMR_Input_GetDeviceDescW = nullptr; */
+
+    /* VBVMR_AudioCallbackRegister = nullptr;
     VBVMR_AudioCallbackStart = nullptr;
     VBVMR_AudioCallbackStop = nullptr;
     VBVMR_AudioCallbackUnregister = nullptr;
+
     VBVMR_MacroButton_IsDirty = nullptr;
     VBVMR_MacroButton_GetStatus = nullptr;
-    VBVMR_MacroButton_SetStatus = nullptr;
+    VBVMR_MacroButton_SetStatus = nullptr; */
 
     initialized = false;
 }
@@ -276,45 +265,26 @@ bool VoicemeeterManager::Initialize(int voicemeeterType) {
     }
     if (loggedIn) {
         LOG_DEBUG("Starting check for Voicemeeter audio engine status.");
+
         bool audioEngineRunning = false;
 
         for (int attempt = 0; attempt < MAX_RETRIES; ++attempt) {
-            float volumePercent = 0.0f;
-            bool isMuted = false;
+            long isDirty = VBVMR_IsParametersDirty();
 
-            // Hypothetical response code from GetVoicemeeterVolume for debugging purposes
-            int responseCode = GetVoicemeeterVolume(0, VolumeUtils::ChannelType::Output, volumePercent, isMuted);
-
-            switch (responseCode) {
-                case 1:  // Success
-                    audioEngineRunning = true;
-                    LOG_DEBUG("Audio engine running on attempt " + std::to_string(attempt + 1) +
-                              ". Initial bus gain: " + std::to_string(volumePercent) + "%" +
-                              ", Mute state: " + (isMuted ? "Muted" : "Unmuted") + ".");
-                    break;
-                case -1:  // Device not found
-                    LOG_WARNING("Attempt " + std::to_string(attempt + 1) +
-                                ": Audio device not found. Response code: -1.");
-                    break;
-                case -2:  // API not initialized
-                    LOG_WARNING("Attempt " + std::to_string(attempt + 1) +
-                                ": Voicemeeter API not initialized. Response code: -2.");
-                    break;
-                case -3:  // Parameters dirty (e.g., configuration change)
-                    LOG_DEBUG("Attempt " + std::to_string(attempt + 1) +
-                              ": Parameters dirty, indicating possible config change. Response code: -3.");
-                    break;
-                case -4:  // General API error
-                    LOG_ERROR("Attempt " + std::to_string(attempt + 1) +
-                              ": General API error. Response code: -4.");
-                    break;
-                default:  // Unknown response code
-                    LOG_ERROR("Attempt " + std::to_string(attempt + 1) +
-                              ": Unknown response code received: " + std::to_string(responseCode) + ".");
-                    break;
+            if (isDirty == 1) {
+                audioEngineRunning = true;
+                LOG_DEBUG("Audio engine running on attempt " + std::to_string(attempt + 1) +
+                          ". Parameters are clean, indicating engine is ready.");
+                break;
+            } else if (isDirty == -1 || isDirty == -2) {
+                LOG_WARNING("Attempt " + std::to_string(attempt + 1) +
+                            ": Voicemeeter not properly initialized.");
+            } else if (isDirty == 0) {
+                LOG_DEBUG("Attempt " + std::to_string(attempt + 1) +
+                          ": Parameters are dirty, engine may still be starting.");
             }
 
-            if (audioEngineRunning) break;  // Exit loop if engine confirmed running
+            if (audioEngineRunning) break;
 
             std::this_thread::sleep_for(std::chrono::milliseconds(RETRY_DELAY_MS));
         }
@@ -326,61 +296,45 @@ bool VoicemeeterManager::Initialize(int voicemeeterType) {
             return false;
         }
 
+        LOG_DEBUG("Voicemeeter login and audio engine confirmation successful.");
 
-
-    LOG_DEBUG("Voicemeeter login and audio engine confirmation successful.");
-
-    // Initialize channel states based on Voicemeeter type
-    std::string typeStr;
-    int maxStrips = 0;
-    int maxBuses = 0;
-
-    // Set limits based on Voicemeeter type
-    switch (vmType) {
-        case 1:
-            typeStr = "Voicemeeter";
-            maxStrips = 3;  // Including virtual inputs
-            maxBuses = 2;
-            break;
-        case 2:
-            typeStr = "Voicemeeter Banana";
-            maxStrips = 5;  // Including virtual inputs
-            maxBuses = 5;
-            break;
-        case 3:
-            typeStr = "Voicemeeter Potato";
-            maxStrips = 8;  // Including virtual inputs
-            maxBuses = 8;
-            break;
-        default:
-            LOG_ERROR("Unknown Voicemeeter type.");
-            Shutdown();
-            return false;
-    }
-
-    LOG_INFO("Voicemeeter Type: " + typeStr);
-
-    // Initialize Input Strips
-    for (int i = 0; i < maxStrips; ++i) {
-        if (!InitializeVoicemeeterState(i, VolumeUtils::ChannelType::Input)) {
-            LOG_WARNING("Failed to initialize state for Input Strip " + std::to_string(i));
+        // Initialize based on Voicemeeter type
+        std::string typeStr;
+        int maxStrips = 0;
+        int maxBuses = 0;
+        // Set limits based on Voicemeeter type
+        switch (vmType) {
+            case 1:
+                typeStr = "Voicemeeter";
+                maxStrips = 3;  // Including virtual inputs
+                maxBuses = 2;
+                break;
+            case 2:
+                typeStr = "Voicemeeter Banana";
+                maxStrips = 5;  // Including virtual inputs
+                maxBuses = 5;
+                break;
+            case 3:
+                typeStr = "Voicemeeter Potato";
+                maxStrips = 8;  // Including virtual inputs
+                maxBuses = 8;
+                break;
+            default:
+                LOG_ERROR("Unknown Voicemeeter type.");
+                Shutdown();
+                return false;
         }
+
+        LOG_INFO("Voicemeeter Type: " + typeStr);
+
+        // You can perform additional initialization here if needed
+    } else {
+        LOG_ERROR("Voicemeeter login failed.");
+        UnloadVoicemeeterRemote();
+        UninitializeCOM();  // Clean up COM if login fails
     }
 
-    // Initialize Output Buses
-    for (int i = 0; i < maxBuses; ++i) {
-        if (!InitializeVoicemeeterState(i, VolumeUtils::ChannelType::Output)) {
-            LOG_WARNING("Failed to initialize state for Output Bus " + std::to_string(i));
-        }
-    }
-}
-else {
-    LOG_ERROR("Voicemeeter login failed.");
-    UnloadVoicemeeterRemote();
-    UninitializeCOM();  // Clean up COM if login fails
-}
-
-return loggedIn;
+    return loggedIn;
 }
 
 // Shutdown the Voicemeeter API and log out
@@ -391,7 +345,7 @@ void VoicemeeterManager::Shutdown() {
         UnloadVoicemeeterRemote();
         loggedIn = false;
     }
-    UninitializeCOM();  // Ensure COM is uninitialized
+    UninitializeCOM();
 }
 
 // Sends a shutdown command to Voicemeeter
@@ -547,47 +501,48 @@ void VoicemeeterManager::ListOutputs() {
 }
 
 // Retrieves the current volume and mute state of a channel
-bool VoicemeeterManager::GetVoicemeeterVolume(int channelIndex, VolumeUtils::ChannelType channelType, float& volumePercent, bool& isMuted) {
+bool VoicemeeterManager::GetVoicemeeterVolume(int channelIndex, ChannelType channelType, float& volumePercent, bool& isMuted) {
     float gainValue = 0.0f;
     float muteValue = 0.0f;
     std::string gainParam;
     std::string muteParam;
 
-    if (channelType == VolumeUtils::ChannelType::Input) {
+    if (channelType == ChannelType::Input) {
         gainParam = "Strip[" + std::to_string(channelIndex) + "].Gain";
         muteParam = "Strip[" + std::to_string(channelIndex) + "].Mute";
-    } else {  // VolumeUtils::ChannelType::Output
+    } else {
         gainParam = "Bus[" + std::to_string(channelIndex) + "].Gain";
         muteParam = "Bus[" + std::to_string(channelIndex) + "].Mute";
     }
 
     if (VBVMR_GetParameterFloat(const_cast<char*>(gainParam.c_str()), &gainValue) != 0) {
-        LOG_ERROR("Failed to get Gain parameter for " + gainParam);
+        LOG_DEBUG("Failed to get Gain parameter for " + gainParam);
         return false;
     }
 
     if (VBVMR_GetParameterFloat(const_cast<char*>(muteParam.c_str()), &muteValue) != 0) {
-        LOG_ERROR("Failed to get Mute parameter for " + muteParam);
+        LOG_DEBUG("Failed to get Mute parameter for " + muteParam);
         return false;
     }
 
-    volumePercent = VolumeUtils::dBmToPercent(gainValue);  // Use VolumeUtils
+    volumePercent = VolumeUtils::dBmToPercent(gainValue);
     isMuted = (muteValue != 0.0f);
 
+    LOG_DEBUG("Volume: " + std::to_string(volumePercent) + "% " + (isMuted ? "(Muted)" : "(Unmuted)"));
     return true;
 }
 
 // Updates the Voicemeeter volume and mute state of a channel
-void VoicemeeterManager::UpdateVoicemeeterVolume(int channelIndex, VolumeUtils::ChannelType channelType, float volumePercent, bool isMuted) {
+void VoicemeeterManager::UpdateVoicemeeterVolume(int channelIndex, ChannelType channelType, float volumePercent, bool isMuted) {
     float dBmValue = VolumeUtils::PercentToDbm(volumePercent);  // Use VolumeUtils
 
     std::string gainParam;
     std::string muteParam;
 
-    if (channelType == VolumeUtils::ChannelType::Input) {
+    if (channelType == ChannelType::Input) {
         gainParam = "Strip[" + std::to_string(channelIndex) + "].Gain";
         muteParam = "Strip[" + std::to_string(channelIndex) + "].Mute";
-    } else {  // VolumeUtils::ChannelType::Output
+    } else {  // ChannelType::Output
         gainParam = "Bus[" + std::to_string(channelIndex) + "].Gain";
         muteParam = "Bus[" + std::to_string(channelIndex) + "].Mute";
     }
@@ -612,187 +567,222 @@ bool VoicemeeterManager::IsParametersDirty() {
     }
 
     long result = VBVMR_IsParametersDirty();
-    if (result == 0) {
-        LOG_DEBUG("IsParametersDirty: Parameters have changed (dirty).");
-        return true;
-    } else if (result == 1) {
-        LOG_DEBUG("IsParametersDirty: Parameters have not changed (not dirty).");
+    switch (result) {
+        case 0:  // No new parameters
+            LOG_DEBUG("IsParametersDirty: Parameters have not changed (not dirty).");
+            return false;
+        case 1:  // Parameters have changed
+            LOG_DEBUG("IsParametersDirty: Parameters have changed (dirty).");
+            return true;
+
+        case -1:  // Unexpected error
+            LOG_ERROR("IsParametersDirty: Unexpected error occurred.");
+            return false;
+        case -2:  // No server
+            LOG_ERROR("IsParametersDirty: No Voicemeeter server detected.");
+            return false;
+        default:
+            LOG_ERROR("IsParametersDirty: Unknown result code: " + std::to_string(result));
+            return false;
+    }
+}
+
+// **Implementation of GetChannelVolume**
+bool VoicemeeterManager::GetChannelVolume(int channelIndex, ChannelType channelType, float& volumePercent) {
+    std::lock_guard<std::mutex> lock(channelMutex);
+
+    float gainValue = 0.0f;
+    std::string gainParam;
+
+    if (channelType == ChannelType::Input) {
+        gainParam = "Strip[" + std::to_string(channelIndex) + "].Gain";
+    } else {  // ChannelType::Output
+        gainParam = "Bus[" + std::to_string(channelIndex) + "].Gain";
+    }
+
+    long result = VBVMR_GetParameterFloat(const_cast<char*>(gainParam.c_str()), &gainValue);
+    if (result != 0) {
+        LOG_DEBUG("Failed to get Gain parameter for " + gainParam);
         return false;
-    } else {
-        LOG_ERROR("IsParametersDirty: Unknown result code: " + std::to_string(result));
-        return false;
     }
+
+    volumePercent = VolumeUtils::dBmToPercent(gainValue);
+    LOG_DEBUG("Channel " + std::to_string(channelIndex) + " Volume: " + std::to_string(volumePercent) + "%");
+    return true;
 }
 
-// Lists all monitorable audio devices
-void VoicemeeterManager::ListMonitorableDevices() {
-    // Ensure COM is initialized
-    if (!comInitialized) {
-        LOG_ERROR("COM library is not initialized. Unable to list monitorable devices.");
-        return;
-    }
+// **Implementation of IsChannelMuted**
+bool VoicemeeterManager::IsChannelMuted(int channelIndex, ChannelType channelType) {
+    std::lock_guard<std::mutex> lock(channelMutex);
 
-    HRESULT hr;
-    ComPtr<IMMDeviceEnumerator> pEnumerator;
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                          __uuidof(IMMDeviceEnumerator), &pEnumerator);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to create MMDeviceEnumerator. HRESULT: " + std::to_string(hr));
-        return;
-    }
-
-    ComPtr<IMMDeviceCollection> pCollection;
-    hr = pEnumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &pCollection);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to enumerate audio endpoints. HRESULT: " + std::to_string(hr));
-        return;
-    }
-
-    UINT count = 0;
-    hr = pCollection->GetCount(&count);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to get device count. HRESULT: " + std::to_string(hr));
-        return;
-    }
-
-    LOG_INFO("Available audio devices for monitoring:");
-    LOG_INFO("-------------------------------------------------");
-    LOG_INFO("| Index | Device Name                     | UUID                     |");
-    LOG_INFO("-------------------------------------------------");
-
-    for (UINT i = 0; i < count; ++i) {
-        ComPtr<IMMDevice> pDevice;
-        hr = pCollection->Item(i, &pDevice);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to get device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
-            continue;
-        }
-
-        // Get the device ID (UUID)
-        LPWSTR deviceId = nullptr;
-        hr = pDevice->GetId(&deviceId);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to get device ID for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
-            continue;
-        }
-
-        // Get the device name
-        ComPtr<IPropertyStore> pProps;
-        hr = pDevice->OpenPropertyStore(STGM_READ, &pProps);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to open property store for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
-            CoTaskMemFree(deviceId);
-            continue;
-        }
-
-        PROPVARIANT varName;
-        PropVariantInit(&varName);
-        hr = pProps->GetValue(PKEY_Device_FriendlyName, &varName);
-        if (FAILED(hr)) {
-            LOG_ERROR("Failed to get friendly name for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
-            PropVariantClear(&varName);
-            CoTaskMemFree(deviceId);
-            continue;
-        }
-
-        // Convert device ID (UUID) from wide string to UTF-8
-        std::wstring wDeviceId(deviceId);
-        int size_needed = WideCharToMultiByte(CP_UTF8, 0, wDeviceId.c_str(), -1, NULL, 0, NULL, NULL);
-        std::string deviceUUID(size_needed - 1, 0);
-        WideCharToMultiByte(CP_UTF8, 0, wDeviceId.c_str(), -1, &deviceUUID[0], size_needed, NULL, NULL);
-
-        // Convert device name from wide string to UTF-8
-        std::wstring wDeviceName(varName.pwszVal);
-        size_needed = WideCharToMultiByte(CP_UTF8, 0, wDeviceName.c_str(), -1, NULL, 0, NULL, NULL);
-        std::string deviceName(size_needed - 1, 0);
-        WideCharToMultiByte(CP_UTF8, 0, wDeviceName.c_str(), -1, &deviceName[0], size_needed, NULL, NULL);
-
-        LOG_INFO("| " + std::to_string(i) +
-                 "     | " + deviceName +
-                 " | " + deviceUUID + " |");
-
-        // Clean up
-        PropVariantClear(&varName);
-        CoTaskMemFree(deviceId);
-    }
-
-    LOG_INFO("-------------------------------------------------");
-}
-
-// Initializes the state of a specific Voicemeeter channel
-bool VoicemeeterManager::InitializeVoicemeeterState(int channelIndex, VolumeUtils::ChannelType channelType) {
-    float volumePercent = 0.0f;
-    bool isMuted = false;
-
-    if (GetVoicemeeterVolume(channelIndex, channelType, volumePercent, isMuted)) {
-        std::lock_guard<std::mutex> lock(channelStatesMutex);
-        channelStates[channelIndex].volume = volumePercent;
-        channelStates[channelIndex].isMuted = isMuted;
-    } else {
-        std::lock_guard<std::mutex> lock(channelStatesMutex);
-        channelStates[channelIndex].volume = 0.0f;
-        channelStates[channelIndex].isMuted = false;
-    }
-
-    LOG_DEBUG("Initial Voicemeeter Volume for Channel " + std::to_string(channelIndex) +
-              ": " + std::to_string(channelStates[channelIndex].volume) +
-              "% " + (channelStates[channelIndex].isMuted ? "(Muted)" : "(Unmuted)"));
-
-    return true;  // Modify this to return false based on specific failure conditions if needed
-}
-
-// Retrieves the current volume percentage of a channel
-float VoicemeeterManager::GetChannelVolume(int channelIndex, VolumeUtils::ChannelType channelType) {
-    std::lock_guard<std::mutex> lock(channelStatesMutex);
-    auto it = channelStates.find(channelIndex);
-    if (it != channelStates.end()) {
-        return it->second.volume;
-    }
-    return -1.0f;  // Indicates failure or uninitialized state
-}
-
-// Checks if a channel is muted
-bool VoicemeeterManager::IsChannelMuted(int channelIndex, VolumeUtils::ChannelType channelType) {
-    std::lock_guard<std::mutex> lock(channelStatesMutex);
-    auto it = channelStates.find(channelIndex);
-    if (it != channelStates.end()) {
-        return it->second.isMuted;
-    }
-    return false;  // Default to unmuted if state is unavailable
-}
-
-bool VoicemeeterManager::SetMute(int channelIndex, VolumeUtils::ChannelType channelType, bool isMuted) {
-    std::lock_guard<std::mutex> lock(toggleMutex);
-    bool result = SetMuteInternal(channelIndex, channelType, isMuted);
-    if (result) {
-        // Update the internal state
-        std::lock_guard<std::mutex> stateLock(channelStatesMutex);
-        channelStates[channelIndex].isMuted = isMuted;
-        LOG_INFO("SetMute successful: Channel " + std::to_string(channelIndex) +
-                 " (" + (channelType == VolumeUtils::ChannelType::Input ? "Input" : "Output") +
-                 ") is now " + (isMuted ? "Muted" : "Unmuted") + ".");
-    } else {
-        LOG_ERROR("SetMute failed: Unable to set mute state for Channel " + std::to_string(channelIndex) + ".");
-    }
-    return result;
-}
-
-bool VoicemeeterManager::SetMuteInternal(int channelIndex, VolumeUtils::ChannelType channelType, bool isMuted) {
+    float muteValue = 0.0f;
     std::string muteParam;
 
-    if (channelType == VolumeUtils::ChannelType::Input) {
+    if (channelType == ChannelType::Input) {
         muteParam = "Strip[" + std::to_string(channelIndex) + "].Mute";
-    } else {  // Output
+    } else {  // ChannelType::Output
+        muteParam = "Bus[" + std::to_string(channelIndex) + "].Mute";
+    }
+
+    long result = VBVMR_GetParameterFloat(const_cast<char*>(muteParam.c_str()), &muteValue);
+    if (result != 0) {
+        LOG_DEBUG("Failed to get Mute parameter for " + muteParam);
+        return false;
+    }
+
+    bool isMuted = (muteValue != 0.0f);
+    LOG_DEBUG("Channel " + std::to_string(channelIndex) + " Mute State: " + (isMuted ? "Muted" : "Unmuted"));
+    return isMuted;
+}
+
+// **Commenting Out Unused Audio Callback Functions**
+// If your application does not utilize audio callbacks, you can comment out the following functions.
+// This helps in maintaining a cleaner codebase.
+
+// Example:
+
+// // Registers an audio callback
+// long VoicemeeterManager::RegisterAudioCallback(long mode, std::function<void(void*, long, void*, long)> pCallback, void* lpUser, char szClientName[64]) {
+//     return VBVMR_AudioCallbackRegister(mode, pCallback, lpUser, szClientName);
+// }
+
+// // Starts audio callbacks
+// long VoicemeeterManager::StartAudioCallbacks() {
+//     return VBVMR_AudioCallbackStart();
+// }
+
+// // Stops audio callbacks
+// long VoicemeeterManager::StopAudioCallbacks() {
+//     return VBVMR_AudioCallbackStop();
+// }
+
+// // Unregisters audio callbacks
+// long VoicemeeterManager::UnregisterAudioCallback() {
+//     return VBVMR_AudioCallbackUnregister();
+// }
+
+// // Checks if MacroButton parameters are dirty
+// bool VoicemeeterManager::IsMacroButtonDirty() {
+//     long result = VBVMR_MacroButton_IsDirty();
+//     return (result == 1);
+// }
+
+// // Gets the status of a MacroButton
+// bool VoicemeeterManager::GetMacroButtonStatus(long nuLogicalButton, float& pValue, long bitmode) {
+//     return (VBVMR_MacroButton_GetStatus(nuLogicalButton, &pValue, bitmode) == 0);
+// }
+
+// // Sets the status of a MacroButton
+// bool VoicemeeterManager::SetMacroButtonStatus(long nuLogicalButton, float fValue, long bitmode) {
+//     return (VBVMR_MacroButton_SetStatus(nuLogicalButton, fValue, bitmode) == 0);
+// }
+
+
+// Implement ListMonitorableDevices method without using std::wstring_convert
+void VoicemeeterManager::ListMonitorableDevices() {
+    try {
+        LOG_INFO("Listing Monitorable Devices:");
+
+        // Example: Listing all audio endpoints using MMDevice API
+        // This requires proper COM initialization, which should already be handled in Initialize()
+
+        ComPtr<IMMDeviceEnumerator> enumerator;
+        HRESULT hr = CoCreateInstance(
+            __uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+            __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(enumerator.GetAddressOf())
+        );
+
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to create IMMDeviceEnumerator. HRESULT: " + std::to_string(hr));
+            return;
+        }
+
+        ComPtr<IMMDeviceCollection> deviceCollection;
+        hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &deviceCollection);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to enumerate audio endpoints. HRESULT: " + std::to_string(hr));
+            return;
+        }
+
+        UINT deviceCount;
+        hr = deviceCollection->GetCount(&deviceCount);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to get device count. HRESULT: " + std::to_string(hr));
+            return;
+        }
+
+        LOG_INFO("+---------+----------------------+");
+        LOG_INFO("| Index   | Device Name           |");
+        LOG_INFO("+---------+----------------------+");
+
+        for (UINT i = 0; i < deviceCount; ++i) {
+            ComPtr<IMMDevice> device;
+            hr = deviceCollection->Item(i, &device);
+            if (FAILED(hr)) {
+                LOG_ERROR("Failed to get device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+                continue;
+            }
+
+            ComPtr<IPropertyStore> propertyStore;
+            hr = device->OpenPropertyStore(STGM_READ, &propertyStore);
+            if (FAILED(hr)) {
+                LOG_ERROR("Failed to open property store for device " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+                continue;
+            }
+
+            PROPVARIANT varName;
+            PropVariantInit(&varName);
+            hr = propertyStore->GetValue(PKEY_Device_FriendlyName, &varName);
+            if (FAILED(hr)) {
+                LOG_ERROR("Failed to get device name for device " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+                PropVariantClear(&varName);
+                continue;
+            }
+
+            std::wstring deviceName(varName.pwszVal);
+            std::string deviceNameStr;
+
+            // Convert std::wstring to std::string using WideCharToMultiByte
+            int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, deviceName.c_str(), -1, NULL, 0, NULL, NULL);
+            if (sizeNeeded > 0) {
+                deviceNameStr.resize(sizeNeeded - 1); // Exclude null terminator
+                WideCharToMultiByte(CP_UTF8, 0, deviceName.c_str(), -1, &deviceNameStr[0], sizeNeeded, NULL, NULL);
+            } else {
+                deviceNameStr = "Unknown Device";
+            }
+
+            LOG_INFO("| " + std::to_string(i) + " | " + deviceNameStr + " |");
+            PropVariantClear(&varName);
+        }
+
+        LOG_INFO("+---------+----------------------+");
+    } catch (const std::exception& ex) {
+        LOG_ERROR("Exception in ListMonitorableDevices: " + std::string(ex.what()));
+    }
+}
+
+bool VoicemeeterManager::SetMute(int channelIndex, ChannelType channelType, bool isMuted) {
+    std::lock_guard<std::mutex> lock(channelMutex); // Ensure thread safety
+    return SetMuteInternal(channelIndex, channelType, isMuted);
+}
+
+bool VoicemeeterManager::SetMuteInternal(int channelIndex, ChannelType channelType, bool isMuted) {
+    std::string muteParam;
+
+    if (channelType == ChannelType::Input) {
+        muteParam = "Strip[" + std::to_string(channelIndex) + "].Mute";
+    } else { // ChannelType::Output
         muteParam = "Bus[" + std::to_string(channelIndex) + "].Mute";
     }
 
     float muteValue = isMuted ? 1.0f : 0.0f;
-    long apiResult = VBVMR_SetParameterFloat(const_cast<char*>(muteParam.c_str()), muteValue);
+    long result = VBVMR_SetParameterFloat(const_cast<char*>(muteParam.c_str()), muteValue);
 
-    if (apiResult != 0) {
-        LOG_ERROR("Failed to set mute parameter: " + muteParam + " with value: " + std::to_string(muteValue));
+    if (result != 0) {
+        LOG_ERROR("Failed to set Mute parameter for " + muteParam + ". Error code: " + std::to_string(result));
         return false;
     }
 
+    LOG_DEBUG("Channel " + std::to_string(channelIndex) + " mute state set to " + (isMuted ? "Muted" : "Unmuted"));
     return true;
 }

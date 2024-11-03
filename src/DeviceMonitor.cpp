@@ -146,13 +146,13 @@ void DeviceMonitor::HandleDeviceUnplugged() {
 }
 
 void DeviceMonitor::ToggleMute(const std::string &type, int index1, int index2, bool isPluggedIn) {
-    VolumeUtils::ChannelType channelType;
+    ChannelType channelType;
 
     if (type == "input") {
-        channelType = VolumeUtils::ChannelType::Input;
+        channelType = ChannelType::Input;
     }
     else if (type == "output") {
-        channelType = VolumeUtils::ChannelType::Output;
+        channelType = ChannelType::Output;
     }
     else {
         LOG_ERROR("Invalid toggle type: " + type);

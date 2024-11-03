@@ -24,9 +24,27 @@ target_include_directories(VoiceMirror PRIVATE "${CMAKE_SOURCE_DIR}/include")
 # Specify C++ standard and required features
 target_compile_features(VoiceMirror PRIVATE cxx_std_17)
 
+# **Set Runtime Library Property for MSVC Only if Not Already Set**
+if (MSVC)
+    # CMake 3.15 and above support CMAKE_MSVC_RUNTIME_LIBRARY
+    if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.15")
+        # Check if CMAKE_MSVC_RUNTIME_LIBRARY is already set via presets
+        if(NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+            set_property(TARGET VoiceMirror PROPERTY CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+        endif()
+    else()
+        # Fallback for older CMake versions
+        if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+            target_compile_options(VoiceMirror PRIVATE /MDd)
+        else()
+            target_compile_options(VoiceMirror PRIVATE /MD)
+        endif()
+    endif()
+endif()
+
 # Compiler options for each build configuration
 target_compile_options(VoiceMirror PRIVATE 
-    $<$<CONFIG:Debug>:/W3 /WX /RTC1 /Zi /Od>
+    $<$<CONFIG:Debug>:/Zi /EHsc /Oy- /Ob0>
     $<$<CONFIG:Release>:/W3 /WX /O2 /Ob2 /Oi /Ot /GL /DNDEBUG /fp:fast /arch:AVX2>
 )
 

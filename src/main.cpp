@@ -1,3 +1,5 @@
+// main.cpp
+
 #include <windows.h>
 
 #include <atomic>
@@ -5,6 +7,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -14,92 +17,175 @@
 #include <unordered_map>
 
 // Project-Specific Includes
-#include "ConfigParser.h"        // Parsing and validating application configurations
-#include "Defconf.h"             // Definitions (e.g., EVENT_NAME and MUTEX_NAME)
-#include "DeviceMonitor.h"       // Manages monitoring of device states and events
-#include "Logger.h"              // Logging utilities for debugging and information output
-#include "RAIIHandle.h"          // RAII wrapper for HANDLEs
-#include "VoicemeeterManager.h"  // Manages Voicemeeter instances and configuration
-#include "VolumeMirror.h"        // Core mirroring functionality for audio volume levels
-#include "VolumeUtils.h"         // Utility functions and definitions for volume controls
-#include "cxxopts.hpp"           // Command-line parsing library for handling CLI options
+#include "ConfigParser.h"          // Parsing and validating application configurations
+#include "Defconf.h"               // Definitions (e.g., EVENT_NAME and MUTEX_NAME)
+#include "DeviceMonitor.h"         // Manages monitoring of device states and events
+#include "Logger.h"                // Logging utilities for debugging and information output
+#include "RAIIHandle.h"            // RAII wrapper for HANDLEs
+#include "VoicemeeterManager.h"    // Manages Voicemeeter instances and configuration
+#include "VolumeMirror.h"          // Core mirroring functionality for audio volume levels
+#include "VolumeUtils.h"           // Utility functions and definitions for volume controls
+#include "WindowsVolumeManager.h"  // Windows-specific volume management
+#include "cxxopts.hpp"             // Command-line parsing library for handling CLI options
 
-// Aliases for improved code readability
 using namespace std::string_view_literals;
-
-// Global Variables
-std::atomic<bool> g_running(true);
-RAIIHandle g_hQuitEvent;  // RAIIHandle instance for quit event
-std::mutex cv_mtx;
-std::condition_variable cv;
-bool exitFlag = false;
+using namespace std::string_literals;
 
 // Forward declaration of functions
-bool InitializeQuitEvent();
-void WaitForQuitEvent();
-void signalHandler(int signum);
+void PlayStartupSound();
 
-/**
- * @brief Helper function to set Windows volume (unchanged)
- */
-bool SetWindowsVolume(int volumePercent) {
-    // [Implementation remains the same as previously provided]
-    // Placeholder implementation
+// Application state encapsulation
+class Application {
+   public:
+    Application() : g_running(true), exitFlag(false) {}
+    std::atomic<bool> g_running;
+    RAIIHandle g_hQuitEvent;
+    std::mutex cv_mtx;
+    std::condition_variable cv;
+    bool exitFlag;
+};
+
+// Global pointer for signal handler to access Application state
+Application *g_appStatePtr = nullptr;
+
+// Initialize quit event with Application reference
+bool InitializeQuitEvent(Application &appState) {
+    appState.g_hQuitEvent = RAIIHandle(CreateEventA(NULL, TRUE, FALSE, EVENT_NAME));
+    if (!appState.g_hQuitEvent.get()) {
+        LOG_ERROR("Failed to create or open quit event. Error: " + std::to_string(GetLastError()));
+        return false;
+    }
+    LOG_DEBUG("Quit event created or opened successfully.");
     return true;
 }
 
-/**
- * @brief Helper function to play the startup sound (unchanged)
- */
+// Signal handler needs to interact with Application state
+void signalHandler(int signum) {
+    if (g_appStatePtr) {
+        LOG_INFO("Interrupt signal (" + std::to_string(signum) + ") received. Shutting down...");
+        g_appStatePtr->g_running = false;
+        SetEvent(g_appStatePtr->g_hQuitEvent.get());
+        g_appStatePtr->cv.notify_one();
+    }
+}
+
 void PlayStartupSound() {
-    // [Implementation remains the same as previously provided]
-    // Placeholder implementation
+    // Introduce a slight delay (e.g., 500 milliseconds) before playing the sound
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+    // Define the path to the startup sound file
+    // Ensure that "m95.mp3" is located in the same directory as the executable
+    std::wstring soundFilePath = L"m95.mp3";
+
+    // Define an alias for the media
+    const wchar_t* aliasName = L"StartupSound";
+
+    // Construct the MCI open command
+    std::wstring openCommand = L"open \"" + soundFilePath + L"\" type mpegvideo alias " + aliasName;
+
+    // Send the open command
+    MCIERROR mciError = mciSendStringW(openCommand.c_str(), NULL, 0, NULL);
+    if (mciError != 0) {
+        wchar_t errorText[256];
+        // Retrieve the error string
+        if (mciGetErrorStringW(mciError, errorText, sizeof(errorText) / sizeof(wchar_t)) == 0) {
+            // If retrieval fails, provide a generic error message
+            LOG_ERROR("Failed to open audio file with MCI. Unknown error.");
+            return;
+        }
+
+        // Convert wchar_t* to std::string using WideCharToMultiByte
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, errorText, -1, NULL, 0, NULL, NULL);
+        std::string errorStr;
+        if (sizeNeeded > 0) {
+            errorStr.resize(sizeNeeded - 1); // Exclude null terminator
+            WideCharToMultiByte(CP_UTF8, 0, errorText, -1, &errorStr[0], sizeNeeded, NULL, NULL);
+        } else {
+            // Fallback if conversion fails
+            errorStr = "Unknown error";
+        }
+
+        LOG_ERROR(std::string("Failed to open audio file with MCI. Error: ") + errorStr);
+        return;
+    }
+
+    // Send the play command
+    std::wstring playCommand = L"play " + std::wstring(aliasName) + L" wait";
+    mciError = mciSendStringW(playCommand.c_str(), NULL, 0, NULL);
+    if (mciError != 0) {
+        wchar_t errorText[256];
+        if (mciGetErrorStringW(mciError, errorText, sizeof(errorText) / sizeof(wchar_t)) == 0) {
+            LOG_ERROR("Failed to play audio file with MCI. Unknown error.");
+            return;
+        }
+
+        // Convert wchar_t* to std::string using WideCharToMultiByte
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, errorText, -1, NULL, 0, NULL, NULL);
+        std::string errorStr;
+        if (sizeNeeded > 0) {
+            errorStr.resize(sizeNeeded - 1); // Exclude null terminator
+            WideCharToMultiByte(CP_UTF8, 0, errorText, -1, &errorStr[0], sizeNeeded, NULL, NULL);
+        } else {
+            // Fallback if conversion fails
+            errorStr = "Unknown error";
+        }
+
+        LOG_ERROR(std::string("Failed to play audio file with MCI. Error: ") + errorStr);
+
+        // Attempt to close the alias before returning
+        std::wstring closeCommand = L"close " + std::wstring(aliasName);
+        mciSendStringW(closeCommand.c_str(), NULL, 0, NULL);
+        return;
+    }
+
+    // Send the close command to release resources
+    std::wstring closeCommand = L"close " + std::wstring(aliasName);
+    mciError = mciSendStringW(closeCommand.c_str(), NULL, 0, NULL);
+    if (mciError != 0) {
+        wchar_t errorText[256];
+        if (mciGetErrorStringW(mciError, errorText, sizeof(errorText) / sizeof(wchar_t)) == 0) {
+            LOG_ERROR("Failed to close audio file with MCI. Unknown error.");
+            return;
+        }
+
+        // Convert wchar_t* to std::string using WideCharToMultiByte
+        int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, errorText, -1, NULL, 0, NULL, NULL);
+        std::string errorStr;
+        if (sizeNeeded > 0) {
+            errorStr.resize(sizeNeeded - 1); // Exclude null terminator
+            WideCharToMultiByte(CP_UTF8, 0, errorText, -1, &errorStr[0], sizeNeeded, NULL, NULL);
+        } else {
+            // Fallback if conversion fails
+            errorStr = "Unknown error";
+        }
+
+        LOG_ERROR(std::string("Failed to close audio file with MCI. Error: ") + errorStr);
+        return;
+    }
+
+    LOG_DEBUG("Startup sound played successfully.");
 }
 
 int main(int argc, char *argv[]) {
-    // Parse command-line options and configurations first to set up logging
-    cxxopts::Options options = ConfigParser::CreateOptions();
+    Application appState;
+    g_appStatePtr = &appState;  // Assign the global pointer for signal handler
 
-    cxxopts::ParseResult result;
-    try {
-        options.positional_help("[optional args]").show_positional_help();
-        options.allow_unrecognised_options();
-        result = options.parse(argc, argv);
-    } catch (const cxxopts::exceptions::parsing &e) {
-        std::cerr << "Unrecognized option or argument error: " << e.what() << std::endl;
-        std::cerr << "Use --help to see available options." << std::endl;
-        return -1;
-    } catch (const std::exception &e) {
-        std::cerr << "Error parsing options: " << e.what() << std::endl;
-        std::cerr << "Use --help to see available options." << std::endl;
-        return -1;
-    }
-
+    // Instantiate ConfigParser with argc and argv
+    ConfigParser parser(argc, argv);
     Config appConfig;
+
     try {
-        ConfigParser::ValidateOptions(result);
+        // Handle configuration parsing (includes parsing config file and command-line options)
+        parser.HandleConfiguration(DEFAULT_CONFIG_FILE, appConfig);
     } catch (const std::exception &e) {
-        std::cerr << "Validation error: " << e.what() << std::endl;
-        return -1;
+        LOG_ERROR("Configuration error: " + std::string(e.what()));
+        return EXIT_FAILURE;
     }
 
-    // Handle configuration file
-    if (result.count("config")) {
-        appConfig.configFilePath = result["config"].as<std::string>();
-    } else {
-        appConfig.configFilePath = DEFAULT_CONFIG_FILE;
-    }
+    // Special commands like --help, --version, and --shutdown are already handled within HandleConfiguration
+    // Thus, no need to handle them again here
 
-    // Parse and apply configuration from the config file and command-line options
-    ConfigParser::HandleConfiguration(appConfig.configFilePath, appConfig);
-    ConfigParser::ApplyCommandLineOptions(result, appConfig);
-
-    if (!ConfigParser::SetupLogging(appConfig)) {
-        std::cerr << "Failed to set up logging. Exiting application." << std::endl;
-        return -1;
-    }
-
-    // Register signal handler for graceful shutdown
+    // Register signal handlers for graceful shutdown
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
@@ -126,16 +212,12 @@ int main(int argc, char *argv[]) {
     }
 
     // Initialize quit event
-    if (!InitializeQuitEvent()) {
+    if (!InitializeQuitEvent(appState)) {
         LOG_ERROR("Failed to initialize quit event.");
         return 1;
     }
 
-    if (ConfigParser::HandleSpecialCommands(appConfig)) {
-        Logger::Instance().Shutdown();
-        return 0;
-    }
-
+    // Hide console if needed
     if (appConfig.hideConsole) {
         HWND hWnd = GetConsoleWindow();
         if (hWnd != NULL) {
@@ -156,6 +238,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    // Handle listing of monitors, inputs, outputs, and channels based on configuration
     if (appConfig.listMonitor) {
         vmrManager.ListMonitorableDevices();
         vmrManager.Shutdown();
@@ -184,13 +267,28 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
+    // Set startup volume using WindowsVolumeManager
     if (appConfig.startupVolumePercent != -1) {
-        if (!SetWindowsVolume(appConfig.startupVolumePercent)) {
-            LOG_ERROR("Failed to set startup volume.");
-        }
+        try {
+            VolumeUtils::WindowsVolumeManager volumeManager;
+            if (appConfig.debug) {  // Add debug logging if debug mode is enabled
+                LOG_DEBUG("Setting startup volume to " + std::to_string(appConfig.startupVolumePercent) + "%");
+            }
+            if (!volumeManager.SetVolume(static_cast<float>(appConfig.startupVolumePercent))) {
+                LOG_ERROR("Failed to set startup volume.");
+            } else {
+                if (appConfig.debug) {
+                    LOG_DEBUG("Startup volume set successfully.");
+                }
+            }
 
-        if (appConfig.startupSound) {
-            PlayStartupSound();
+            if (appConfig.startupSound) {
+                // Start the startup sound in a separate thread
+                std::thread startupSoundThread(PlayStartupSound);
+                startupSoundThread.detach();  // Detach the thread to run independently
+            }
+        } catch (const std::exception &ex) {
+            LOG_ERROR(std::string("Exception while setting startup volume: ") + ex.what());
         }
     }
 
@@ -205,18 +303,25 @@ int main(int argc, char *argv[]) {
     ToggleConfig toggleConfig;
     bool isToggleEnabled = false;
     if (!appConfig.toggleParam.empty()) {
-        toggleConfig = ConfigParser::ParseToggleParameter(appConfig.toggleParam);
-        isToggleEnabled = true;
+        try {
+            toggleConfig = parser.ParseToggleParameter(appConfig.toggleParam);
+            isToggleEnabled = true;
+        } catch (const std::exception &ex) {
+            LOG_ERROR(std::string("Exception while parsing toggle parameter: ") + ex.what());
+            vmrManager.Shutdown();
+            Logger::Instance().Shutdown();
+            return -1;
+        }
     }
 
     std::unique_ptr<VolumeMirror> mirror = nullptr;
     std::unique_ptr<DeviceMonitor> deviceMonitor = nullptr;
     try {
-        VolumeUtils::ChannelType channelType;
+        ChannelType channelType;
         if (typeStr == "input") {
-            channelType = VolumeUtils::ChannelType::Input;
+            channelType = ChannelType::Input;
         } else if (typeStr == "output") {
-            channelType = VolumeUtils::ChannelType::Output;
+            channelType = ChannelType::Output;
         } else {
             LOG_ERROR("Invalid channel type: " + typeStr);
             vmrManager.Shutdown();
@@ -238,12 +343,26 @@ int main(int argc, char *argv[]) {
 
         std::thread quitThread;
         if (isMonitoring) {
-            quitThread = std::thread(WaitForQuitEvent);
+            quitThread = std::thread([&appState]() {
+                while (appState.g_running.load()) {
+                    DWORD result = WaitForSingleObject(appState.g_hQuitEvent.get(), 500);  // Check every 500 ms
+                    if (result == WAIT_OBJECT_0 || !appState.g_running.load()) {
+                        LOG_DEBUG("Quit event signaled or running set to false. Initiating shutdown sequence...");
+                        appState.g_running = false;
+                        {
+                            std::lock_guard<std::mutex> lock(appState.cv_mtx);
+                            appState.exitFlag = true;
+                        }
+                        appState.cv.notify_one();
+                        break;
+                    }
+                }
+            });
         }
 
         {
-            std::unique_lock<std::mutex> lock(cv_mtx);
-            cv.wait(lock, [] { return !g_running.load(); });
+            std::unique_lock<std::mutex> lock(appState.cv_mtx);
+            appState.cv.wait(lock, [&appState] { return !appState.g_running.load(); });
         }
 
         if (mirror) {
@@ -268,42 +387,4 @@ int main(int argc, char *argv[]) {
     }
 
     return 0;
-}
-
-bool InitializeQuitEvent() {
-    g_hQuitEvent = RAIIHandle(CreateEventA(NULL, TRUE, FALSE, EVENT_NAME));
-    if (!g_hQuitEvent.get()) {
-        LOG_ERROR("Failed to create or open quit event. Error: " + std::to_string(GetLastError()));
-        return false;
-    }
-    LOG_DEBUG("Quit event created or opened successfully.");
-    return true;
-}
-
-void signalHandler(int signum) {
-    LOG_INFO("Interrupt signal (" + std::to_string(signum) + ") received. Shutting down...");
-    g_running = false;
-    SetEvent(g_hQuitEvent.get());
-    cv.notify_one();
-}
-
-void WaitForQuitEvent() {
-    if (g_hQuitEvent.get()) {
-        LOG_DEBUG("Waiting for quit event signal...");
-        while (g_running.load()) {
-            DWORD result = WaitForSingleObject(g_hQuitEvent.get(), 500);  // Check every 500 ms
-            if (result == WAIT_OBJECT_0 || !g_running.load()) {
-                LOG_DEBUG("Quit event signaled or running set to false. Initiating shutdown sequence...");
-                g_running = false;
-                {
-                    std::lock_guard<std::mutex> lock(cv_mtx);
-                    exitFlag = true;
-                }
-                cv.notify_one();
-                break;
-            }
-        }
-    } else {
-        LOG_ERROR("Quit event handle is null; unable to wait for quit event.");
-    }
 }

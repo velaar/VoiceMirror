@@ -1,10 +1,7 @@
 // VolumeMirror.cpp
 #include "VolumeMirror.h"
 
-#include <windows.h>
 #include <sapi.h>  // For PlaySound
-#include <endpointvolume.h>
-#include <mmdeviceapi.h>
 
 #include <atomic>
 #include <chrono>
@@ -13,13 +10,15 @@
 #include <thread>
 
 #include "Logger.h"
-#include "VolumeUtils.h"
 #include "VoicemeeterManager.h"
+#include "VolumeUtils.h"
+#include "WindowsVolumeManager.h"
+#include "Defconf.h" // Include Defconf.h for constants
 
-using Microsoft::WRL::ComPtr;
+using namespace VolumeUtils;
 
 // Constructor
-VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float minDbmVal,
+VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
                            float maxDbmVal, VoicemeeterManager &manager,
                            bool playSound)
     : channelIndex(channelIdx),
@@ -27,6 +26,7 @@ VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float 
       minDbm(minDbmVal),
       maxDbm(maxDbmVal),
       vmManager(manager),
+      windowsVolumeManager(),
       lastWindowsVolume(-1.0f),
       lastWindowsMute(false),
       lastVmVolume(-1.0f),
@@ -37,74 +37,35 @@ VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float 
       refCount(1),
       playSoundOnSync(playSound),
       pollingEnabled(false),
-      pollingInterval(100),
-      lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(110)),
-      debounceDuration(500) {
-
-
-    HRESULT hr = CoCreateGuid(&eventContextGuid);
-    if (FAILED(hr)) {
-        throw std::runtime_error("Failed to create event context GUID.");
-    }
-
-    // Initialize Windows Audio Components
-    hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_INPROC_SERVER,
-                          __uuidof(IMMDeviceEnumerator), &deviceEnumerator);
-    if (FAILED(hr)) {
-        throw std::runtime_error("Failed to create MMDeviceEnumerator.");
-    }
-
-    hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &speakers);
-    if (FAILED(hr)) {
-        deviceEnumerator.Reset();
-        throw std::runtime_error("Failed to get default audio endpoint.");
-    }
-
-    hr = speakers->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_INPROC_SERVER,
-                            NULL, &endpointVolume);
-    if (FAILED(hr)) {
-        speakers.Reset();
-        deviceEnumerator.Reset();
-        throw std::runtime_error("Failed to get IAudioEndpointVolume.");
-    }
-
-    // Register for volume change notifications
-    hr = endpointVolume->RegisterControlChangeNotify(this);
-    if (FAILED(hr)) {
-        endpointVolume.Reset();
-        speakers.Reset();
-        deviceEnumerator.Reset();
-        throw std::runtime_error("Failed to register for volume change notifications.");
-    }
-
-    // Get initial Windows volume and mute state
-    float currentVolume = 0.0f;
-    hr = endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
-    if (SUCCEEDED(hr)) {
-        lastWindowsVolume = VolumeUtils::ScalarToPercent(currentVolume);
+      pollingInterval(DEFAULT_POLLING_INTERVAL_MS), // Use default from Defconf.h
+      lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(DEFAULT_POLLING_INTERVAL_MS + 10)),
+      debounceDuration(DEBOUNCE_DURATION_MS) { // Initialize from Defconf.h
+    // Initialize VolumeMirror state
+    // Get initial Windows volume and mute state using WindowsVolumeManager
+    float currentVolume = windowsVolumeManager.GetVolume();
+    if (currentVolume >= 0.0f) {  // Valid volume retrieved
+        lastWindowsVolume = currentVolume;
     } else {
         lastWindowsVolume = 0.0f;
     }
 
-    BOOL isMutedBOOL = FALSE;
-    hr = endpointVolume->GetMute(&isMutedBOOL);
-    if (SUCCEEDED(hr)) {
-        lastWindowsMute = (isMutedBOOL != FALSE);
-    } else {
-        lastWindowsMute = false;
-    }
+    bool isMuted = windowsVolumeManager.GetMute();
+    lastWindowsMute = isMuted;
 
     // Retrieve initial Voicemeeter volume and mute state from VoicemeeterManager
-    float vmVolume = vmManager.GetChannelVolume(channelIndex, channelType);
-    bool vmMute = vmManager.IsChannelMuted(channelIndex, channelType);
-
-    if (vmVolume >= 0.0f) { // Valid volume retrieved
+    float vmVolume = 0.0f;
+    bool vmMute = false;
+    if (vmManager.GetVoicemeeterVolume(channelIndex, channelType, vmVolume, vmMute)) {
         lastVmVolume = vmVolume;
         lastVmMute = vmMute;
     } else {
         lastVmVolume = 0.0f;
         lastVmMute = false;
     }
+
+    // Register callback with WindowsVolumeManager
+    windowsVolumeManager.RegisterVolumeChangeCallback(
+        [this](float newVolume, bool isMuted) { this->OnWindowsVolumeChange(newVolume, isMuted); });
 
     LOG_DEBUG("VolumeMirror initialized successfully.");
 }
@@ -113,10 +74,9 @@ VolumeMirror::VolumeMirror(int channelIdx, VolumeUtils::ChannelType type, float 
 VolumeMirror::~VolumeMirror() {
     Stop();
 
-    // Unregister for volume change notifications
-    if (endpointVolume) {
-        endpointVolume->UnregisterControlChangeNotify(this);
-    }
+    // Unregister callback
+    windowsVolumeManager.UnregisterVolumeChangeCallback(
+        [this](float newVolume, bool isMuted) { this->OnWindowsVolumeChange(newVolume, isMuted); });
 
     // Join the monitoring thread if it's joinable
     if (monitorThread.joinable()) {
@@ -164,7 +124,7 @@ void VolumeMirror::Stop() {
 void VolumeMirror::SetPollingMode(bool enabled, int interval) {
     pollingEnabled = enabled;
     pollingInterval = interval;
-    lastSoundPlayTime = std::chrono::steady_clock::now() - std::chrono::milliseconds(pollingInterval + 10);
+    lastSoundPlayTime = std::chrono::steady_clock::now() - std::chrono::milliseconds(interval + 10);
 
     LOG_INFO("Polling mode " +
              std::string(enabled ? "enabled"
@@ -174,59 +134,27 @@ void VolumeMirror::SetPollingMode(bool enabled, int interval) {
                       : ""));
 }
 
-// IUnknown methods
-STDMETHODIMP VolumeMirror::QueryInterface(REFIID riid, void **ppvObject) {
-    if (IID_IUnknown == riid || __uuidof(IAudioEndpointVolumeCallback) == riid) {
-        *ppvObject = static_cast<IUnknown *>(this);
-        AddRef();
-        return S_OK;
-    } else {
-        *ppvObject = nullptr;
-        return E_NOINTERFACE;
-    }
-}
-
-STDMETHODIMP_(ULONG)
-VolumeMirror::AddRef() { return ++refCount; }
-
-STDMETHODIMP_(ULONG)
-VolumeMirror::Release() {
-    ULONG ulRef = --refCount;
-    if (0 == ulRef) {
-        delete this;
-    }
-    return ulRef;
-}
-
-// OnNotify implementation - called when Windows volume changes
-STDMETHODIMP VolumeMirror::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
-    // Check if the volume change originated from our own process
-    //if (pNotify->guidEventContext == eventContextGuid) {
-    //    LOG_DEBUG("Ignored volume change notification from our own process.");
-    //    return S_OK;
-    //}
-
+// Callback function for Windows volume changes
+void VolumeMirror::OnWindowsVolumeChange(float newVolume, bool isMuted) {
     if (ignoreWindowsChange)
-        return S_OK;
+        return;
 
     std::lock_guard<std::mutex> lock(vmMutex);
 
-    float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
-    bool newMute = (pNotify->bMuted != FALSE);
-
     // If Windows volume or mute state has changed
     if (!VolumeUtils::IsFloatEqual(newVolume, lastWindowsVolume) ||
-        newMute != lastWindowsMute) {
+        isMuted != lastWindowsMute) {
         lastWindowsVolume = newVolume;
-        lastWindowsMute = newMute;
+        lastWindowsMute = isMuted;
 
         // Update Voicemeeter volume accordingly
         ignoreVoicemeeterChange = true;
-        vmManager.UpdateVoicemeeterVolume(channelIndex, channelType, newVolume, newMute);
+        vmManager.UpdateVoicemeeterVolume(channelIndex, channelType, newVolume, isMuted);
         ignoreVoicemeeterChange = false;
-    }
 
-    return S_OK;
+        // Set the flag to indicate the change originated from Windows
+        changeFromWindows = true;
+    }
 }
 
 // Monitor Voicemeeter parameters in a separate thread
@@ -242,28 +170,29 @@ void VolumeMirror::MonitorVoicemeeter() {
             continue;
 
         if (vmManager.IsParametersDirty()) {
-            
             std::lock_guard<std::mutex> lock(vmMutex);
 
-            float vmVolume = vmManager.GetChannelVolume(channelIndex, channelType);
-            bool vmMute = vmManager.IsChannelMuted(channelIndex, channelType);
-            LOG_DEBUG("Voicemeeter volume: " + std::to_string(vmVolume) + ", mute: " + std::to_string(vmMute));
+            float vmVolume = 0.0f;
+            bool vmMute = false;
+            if (vmManager.GetVoicemeeterVolume(channelIndex, channelType, vmVolume, vmMute)) {
+                LOG_DEBUG("Voicemeeter volume: " + std::to_string(vmVolume) + ", mute: " + std::to_string(vmMute));
 
-            if (vmVolume >= 0.0f && 
-                (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute)) {
-                lastVmVolume = vmVolume;
-                lastVmMute = vmMute;
+                if (vmVolume >= 0.0f &&
+                    (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute)) {
+                    lastVmVolume = vmVolume;
+                    lastVmMute = vmMute;
 
-                // Update Windows volume accordingly
-                ignoreWindowsChange = true;
-                UpdateWindowsVolume(vmVolume, vmMute);
-                ignoreWindowsChange = false;
+                    // Update Windows volume accordingly using WindowsVolumeManager
+                    ignoreWindowsChange = true;
+                    UpdateWindowsVolume(vmVolume, vmMute);
+                    ignoreWindowsChange = false;
 
-                // Mark that a change has occurred and reset the timer
-                lastVmChangeTime = std::chrono::steady_clock::now();
-                pendingSound = true;
+                    // Mark that a change has occurred and reset the timer
+                    lastVmChangeTime = std::chrono::steady_clock::now();
+                    pendingSound = true;
 
-                LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
+                    LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
+                }
             }
         }
 
@@ -272,7 +201,7 @@ void VolumeMirror::MonitorVoicemeeter() {
             auto now = std::chrono::steady_clock::now();
             auto durationSinceLastChange = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastVmChangeTime);
 
-            if (durationSinceLastChange >= debounceDuration) {
+            if (durationSinceLastChange.count() >= debounceDuration) {
                 LOG_DEBUG("Playing sync sound after debounce period");
                 if (playSoundOnSync) {
                     PlaySyncSound();
@@ -297,21 +226,21 @@ void VolumeMirror::UpdateVoicemeeterVolume(float volumePercent, bool isMuted) {
 
 // Update Windows volume and mute state based on Voicemeeter volume
 void VolumeMirror::UpdateWindowsVolume(float volumePercent, bool isMuted) {
-    float scalarValue = VolumeUtils::PercentToScalar(volumePercent);
+    try {
+        // Use WindowsVolumeManager to set volume and mute state
+        if (!windowsVolumeManager.SetVolume(volumePercent)) {
+            LOG_ERROR("VolumeMirror: Failed to set Windows volume.");
+        }
 
-    HRESULT hr = endpointVolume->SetMasterVolumeLevelScalar(scalarValue,
-                                                            &eventContextGuid);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to set Windows master volume.");
+        if (!windowsVolumeManager.SetMute(isMuted)) {
+            LOG_ERROR("VolumeMirror: Failed to set Windows mute state.");
+        }
+
+        LOG_DEBUG("VolumeMirror: Windows volume updated to " + std::to_string(volumePercent) + "%" +
+                  (isMuted ? " (Muted)" : " (Unmuted)"));
+    } catch (const std::exception &ex) {
+        LOG_ERROR(std::string("VolumeMirror: Exception in UpdateWindowsVolume: ") + ex.what());
     }
-
-    hr = endpointVolume->SetMute(isMuted, &eventContextGuid);
-    if (FAILED(hr)) {
-        LOG_ERROR("Failed to set Windows mute state.");
-    }
-
-    LOG_DEBUG("Windows volume updated: " + std::to_string(volumePercent) + "% " +
-              (isMuted ? "(Muted)" : "(Unmuted)"));
 }
 
 // Play synchronization sound
@@ -319,13 +248,19 @@ void VolumeMirror::PlaySyncSound() {
     std::lock_guard<std::mutex> lock(soundMutex);
     auto now = std::chrono::steady_clock::now();
 
-    const std::wstring soundFilePath = L"C:\\Windows\\Media\\Windows Unlock.wav";
-    BOOL played = PlaySoundW(soundFilePath.c_str(), NULL, SND_FILENAME | SND_ASYNC);
+    if (changeFromWindows.load()) {
+        LOG_DEBUG("Change originated from Windows. Skipping PlaySound().");
+        changeFromWindows = false;  // Reset the flag
+        return;
+    }
+
+    // Use constants from Defconf.h
+    BOOL played = PlaySoundW(SYNC_SOUND_FILE_PATH, NULL, SND_FILENAME | SND_ASYNC);
 
     if (!played) {
         LOG_DEBUG("Failed to play custom sound, trying fallback");
         // Always use the system asterisk sound as fallback
-        played = PlaySound(TEXT("SystemAsterisk"), NULL, SND_ALIAS | SND_ASYNC);
+        played = PlaySoundW(SYNC_FALLBACK_SOUND_ALIAS, NULL, SND_ALIAS | SND_ASYNC);
         if (played) {
             LOG_DEBUG("Fallback sound played successfully");
         } else {

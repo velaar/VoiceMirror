@@ -5,6 +5,8 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
+#include <iomanip>
 
 #include "VolumeUtils.h"
 #include "Logger.h"
@@ -14,8 +16,148 @@
 // Include Windows headers only if necessary
 #include <windows.h>
 
-// Include cxxopts if needed for command-line options (though likely not here)
+// Include cxxopts for command-line option parsing
 #include "cxxopts.hpp"
+
+/**
+ * @brief Constructor to initialize command-line arguments.
+ * @param argc Argument count.
+ * @param argv Argument vector.
+ */
+ConfigParser::ConfigParser(int argc, char** argv)
+    : argc_(argc), argv_(argv) {}
+
+/**
+ * @brief Trim whitespace from both ends of a string.
+ * @param str The string to trim.
+ * @return A new trimmed string.
+ */
+std::string ConfigParser::Trim(const std::string& str) {
+    const std::string whitespace = " \t\r\n";
+    size_t start = str.find_first_not_of(whitespace);
+    if (start == std::string::npos)
+        return "";
+    size_t end = str.find_last_not_of(whitespace);
+    return str.substr(start, end - start + 1);
+}
+
+/**
+ * @brief Parse the toggle parameter string into a ToggleConfig structure.
+ * @param toggleParam The toggle parameter string in the format "type:index1:index2".
+ * @return Parsed ToggleConfig structure.
+ * @throws std::runtime_error if the toggle parameter format is invalid.
+ */
+ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) {
+    LOG_DEBUG("Parsing toggle parameter: " + toggleParam);
+    ToggleConfig toggleConfig;
+    std::istringstream ss(toggleParam);
+    std::string segment;
+    std::vector<std::string> segments;
+
+    while (std::getline(ss, segment, ':')) {
+        segments.push_back(Trim(segment));
+    }
+
+    if (segments.size() != 3) {
+        throw std::runtime_error("Invalid toggle parameter format. Expected format: type:index1:index2 (e.g., 'input:0:1')");
+    }
+
+    toggleConfig.type = segments[0];
+    try {
+        toggleConfig.index1 = std::stoi(segments[1]);
+        toggleConfig.index2 = std::stoi(segments[2]);
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("Toggle indices must be integers.");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("Toggle indices are out of range.");
+    }
+
+    LOG_DEBUG("Parsed ToggleConfig - Type: " + toggleConfig.type +
+              ", Index1: " + std::to_string(toggleConfig.index1) +
+              ", Index2: " + std::to_string(toggleConfig.index2));
+
+    return toggleConfig;
+}
+
+/**
+ * @brief Setup the Logger based on the configuration.
+ * @param config The current configuration.
+ * @return True if Logger setup was successful, false otherwise.
+ */
+bool ConfigParser::SetupLogging(const Config& config) {
+    LOG_DEBUG("Setting up logging based on configuration.");
+
+    if (config.loggingEnabled) {
+        try {
+            // Initialize with LogLevel::DEBUG if debug mode is enabled, else LogLevel::INFO
+            LogLevel level = config.debug ? LogLevel::DEBUG : LogLevel::INFO;
+            bool enableFileLogging = config.loggingEnabled;
+            const std::string& filePath = config.logFilePath;
+
+            if (!Logger::Instance().Initialize(level, enableFileLogging, filePath)) {
+                LOG_ERROR("Failed to initialize logger.");
+                return false;
+            }
+
+            LOG_INFO("Logging initialized. Log file: " + config.logFilePath);
+            return true;
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to initialize logger: " + std::string(e.what()));
+            return false;
+        }
+    } else {
+        // Initialize logger without file logging
+        try {
+            Logger::Instance().Initialize(LogLevel::INFO, false, "");
+            LOG_INFO("Logging initialized without file logging.");
+            return true;
+        } catch (const std::exception& e) {
+            LOG_ERROR("Failed to initialize logger: " + std::string(e.what()));
+            return false;
+        }
+    }
+}
+
+/**
+ * @brief Handle the overall configuration parsing.
+ * @param configPath Path to the configuration file.
+ * @param config Reference to the Config structure to populate.
+ */
+void ConfigParser::HandleConfiguration(const std::string& configPath, Config& config) {
+    LOG_DEBUG("Starting configuration handling.");
+
+    // Step 1: Parse configuration file
+    ParseConfigFile(configPath, config);
+
+    // Step 2: Create and parse command-line options
+    cxxopts::Options options = CreateOptions();
+    cxxopts::ParseResult result;
+    try {
+        result = options.parse(argc_, argv_);
+    } catch (const cxxopts::exceptions::parsing& e) {
+        LOG_ERROR("Error parsing command-line options: " + std::string(e.what()));
+        throw;
+    }
+
+    // Step 3: Validate command-line options
+    ValidateOptions(result);
+
+    // Step 4: Apply command-line options to config
+    ApplyCommandLineOptions(result, config);
+
+    // Step 5: Setup logging based on config
+    if (!SetupLogging(config)) {
+        throw std::runtime_error("Failed to setup logging.");
+    }
+
+    // Step 6: Handle special commands
+    if (HandleSpecialCommands(config)) {
+        // Special command was handled; exit the application
+        exit(0);
+    }
+
+    LOG_DEBUG("Configuration handling completed.");
+}
 
 /**
  * @brief Parse the configuration file and populate the Config structure directly.
@@ -27,6 +169,8 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
         return;
     }
 
+    LOG_DEBUG("Parsing config file: " + configPath);
+
     std::string line;
     while (std::getline(configFile, line)) {
         size_t commentPos = line.find('#');
@@ -34,8 +178,7 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
             line = line.substr(0, commentPos);
         }
 
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+        line = Trim(line);
 
         if (line.empty())
             continue;
@@ -44,10 +187,10 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
         std::string key, value;
 
         if (std::getline(iss, key, '=') && std::getline(iss, value)) {
-            key.erase(0, key.find_first_not_of(" \t\r\n"));
-            key.erase(key.find_last_not_of(" \t\r\n") + 1);
-            value.erase(0, value.find_first_not_of(" \t\r\n"));
-            value.erase(value.find_last_not_of(" \t\r\n") + 1);
+            key = Trim(key);
+            value = Trim(value);
+
+            LOG_DEBUG("Parsing config key: " + key + " = " + value);
 
             // Directly assign to Config structure
             if (key == "list-monitor") {
@@ -90,44 +233,58 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
                 config.startupVolumePercent = std::stoi(value);
             } else if (key == "startup_sound") {
                 config.startupSound = (value == "true" || value == "1");
+            } else if (key == "max_volume") {
+                config.maxVolumePercent = std::stoi(value);
+            } else if (key == "min_volume") {
+                config.minVolumePercent = std::stoi(value);
+            } else if (key == "toggle_command") {
+                config.toggleCommand = value;
+            } else {
+                LOG_DEBUG("Unknown config key: " + key);
             }
             // Add additional configuration keys as necessary
         }
     }
+    LOG_DEBUG("Finished parsing config file");
 }
-
-/**
- * @brief Apply the configuration map to the Config structure.
- * (Removed since configMap is no longer used)
- * This function is no longer necessary and can be removed.
- */
 
 /**
  * @brief Validate command-line options.
  */
 void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
+    LOG_DEBUG("Validating command line options");
+
     if (result.count("index")) {
         int index = result["index"].as<int>();
+        LOG_DEBUG("Validating index: " + std::to_string(index));
         if (index < 0) {
             throw std::runtime_error("Channel index must be non-negative");
         }
     }
     if (result.count("startup-volume")) {
         int vol = result["startup-volume"].as<int>();
-        if (vol < 0 || vol > 100) {
-            throw std::runtime_error("Startup volume must be between 0 and 100.");
+        LOG_DEBUG("Validating startup volume: " + std::to_string(vol));
+        if (vol < DEFAULT_MIN_VOLUME_PERCENT || vol > DEFAULT_MAX_VOLUME_PERCENT) {
+            throw std::runtime_error("Startup volume must be between " +
+                                     std::to_string(DEFAULT_MIN_VOLUME_PERCENT) +
+                                     " and " + std::to_string(DEFAULT_MAX_VOLUME_PERCENT) + ".");
         }
     }
 
     if (result.count("voicemeeter")) {
         int type = result["voicemeeter"].as<int>();
-        if (type < 1 || type > 3) {
-            throw std::runtime_error("Voicemeeter type must be 1 (Standard), 2 (Banana), or 3 (Potato)");
+        LOG_DEBUG("Validating voicemeeter type: " + std::to_string(type));
+        if (type < VOICEMEETER_BASIC || type > VOICEMEETER_POTATO) {
+            throw std::runtime_error("Voicemeeter type must be " +
+                                     std::to_string(VOICEMEETER_BASIC) + " (Basic), " +
+                                     std::to_string(VOICEMEETER_BANANA) + " (Banana), or " +
+                                     std::to_string(VOICEMEETER_POTATO) + " (Potato)");
         }
     }
 
     if (result.count("type")) {
-        std::string type = result["type"].as<std::string>();
+        std::string type = Trim(result["type"].as<std::string>());
+        LOG_DEBUG("Validating channel type: " + type);
         if (type != "input" && type != "output") {
             throw std::runtime_error("Type must be either 'input' or 'output'");
         }
@@ -135,16 +292,21 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
 
     if (result.count("polling")) {
         int interval = result["polling"].as<int>();
+        LOG_DEBUG("Validating polling interval: " + std::to_string(interval));
         if (interval < 10 || interval > 1000) {
             throw std::runtime_error("Polling interval must be between 10 and 1000 milliseconds");
         }
     }
+
+    LOG_DEBUG("Command line options validation complete");
 }
 
 /**
  * @brief Create and return the cxxopts::Options object.
  */
 cxxopts::Options ConfigParser::CreateOptions() {
+    LOG_DEBUG("Creating command line options");
+
     cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
 
     options.add_options()
@@ -153,24 +315,29 @@ cxxopts::Options ConfigParser::CreateOptions() {
         ("S,shutdown", "Shutdown all instances of the app and exit immediately")
         ("H,hidden", "Hide the console window. Use with --log to run without showing the console.")
         ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
-        ("M,list-monitor", "List monitorable audio devices and exit") //defunct
+        ("M,list-monitor", "List monitorable audio devices and exit")
         ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
         ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Voicemeeter, 2: Banana, 3: Potato) (default: 2)", cxxopts::value<int>()->default_value("2"))
-        ("c,config", "Specify a configuration file to manage application parameters.", cxxopts::value<std::string>())
-        ("d,debug", "Enable debug mode for extensive logging")
-        ("h,help", "Show help message and exit")
-        ("i,index", "Specify the Voicemeeter virtual channel index to use (default: 3)", cxxopts::value<int>()->default_value("3"))
-        ("l,log", "Enable logging to a file. Optionally specify a log file path.", cxxopts::value<std::string>()->default_value("VoiceMirror.log"))
-        ("m,monitor", "Monitor a specific audio device by UUID and restart audio engine on plug/unplug events", cxxopts::value<std::string>())
-        ("max", "Maximum dBm for Voicemeeter channel (default: 12.0)", cxxopts::value<float>()->default_value("12.0"))
-        ("min", "Minimum dBm for Voicemeeter channel (default: -60.0)", cxxopts::value<float>()->default_value("-60.0"))
-        ("p,polling", "Enable polling mode with optional interval in milliseconds (default: 100ms)", cxxopts::value<int>()->default_value("100"))
-        ("t,type", "Specify the type of channel to use ('input' or 'output') (default: 'input')", cxxopts::value<std::string>()->default_value("input"))
-        ("v,version", "Show program's version number and exit")
-        ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", cxxopts::value<int>())
-        ("u,startup-sound", "Play a startup sound after setting the initial volume", cxxopts::value<bool>()->default_value("false"));
+        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_VOICEMEETER_TYPE)))
+        ("i,index", "Specify the Voicemeeter virtual channel index to use", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_CHANNEL_INDEX)))
+        ("max", "Maximum dBm for Voicemeeter channel", cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MAX_DBM)))
+        ("min", "Minimum dBm for Voicemeeter channel", cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MIN_DBM)))
+        ("p,polling", "Enable polling mode with optional interval in milliseconds", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))
+        ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_STARTUP_VOLUME_PERCENT)))
+        ("max_volume", "Maximum allowed volume percentage", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_MAX_VOLUME_PERCENT)))
+        ("min_volume", "Minimum allowed volume percentage", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_MIN_VOLUME_PERCENT)))
+        ("toggle_command", "Toggle command parameter", cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_COMMAND));
 
+    options.add_options("Advanced")
+        ("m,monitor", "Specify the monitor device UUID", cxxopts::value<std::string>()->default_value(DEFAULT_MONITOR_DEVICE_UUID))
+        ("log", "Enable logging with specified log file path", cxxopts::value<std::string>()->default_value(DEFAULT_LOG_FILE))
+        ("startup-sound", "Enable startup sound", cxxopts::value<bool>()->default_value("false"));
+
+    options.add_options("Help")
+        ("help", "Print help")
+        ("version", "Print version");
+
+    LOG_DEBUG("Command line options created");
     return options;
 }
 
@@ -178,73 +345,141 @@ cxxopts::Options ConfigParser::CreateOptions() {
  * @brief Apply command-line options directly to the Config structure.
  */
 void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, Config& config) {
-    if (result.count("list-monitor"))
+    LOG_DEBUG("Applying command line options to config");
+
+    if (result.count("list-monitor")) {
         config.listMonitor = true;
-    if (result.count("list-inputs"))
+        LOG_DEBUG("Setting list-monitor: true");
+    }
+    if (result.count("list-inputs")) {
         config.listInputs = true;
-    if (result.count("list-outputs"))
+        LOG_DEBUG("Setting list-inputs: true");
+    }
+    if (result.count("list-outputs")) {
         config.listOutputs = true;
-    if (result.count("list-channels"))
+        LOG_DEBUG("Setting list-outputs: true");
+    }
+    if (result.count("list-channels")) {
         config.listChannels = true;
-    if (result.count("index"))
+        LOG_DEBUG("Setting list-channels: true");
+    }
+    if (result.count("index")) {
         config.index = result["index"].as<int>();
-    if (result.count("type"))
-        config.type = VolumeUtils::Trim(result["type"].as<std::string>());
-    if (result.count("min"))
+        LOG_DEBUG("Setting index: " + std::to_string(config.index));
+    }
+    if (result.count("type")) {
+        config.type = Trim(result["type"].as<std::string>());
+        LOG_DEBUG("Setting type: " + config.type);
+    }
+    if (result.count("min")) {
         config.minDbm = result["min"].as<float>();
-    if (result.count("max"))
+        LOG_DEBUG("Setting min dBm: " + std::to_string(config.minDbm));
+    }
+    if (result.count("max")) {
         config.maxDbm = result["max"].as<float>();
-    if (result.count("voicemeeter"))
+        LOG_DEBUG("Setting max dBm: " + std::to_string(config.maxDbm));
+    }
+    if (result.count("voicemeeter")) {
         config.voicemeeterType = result["voicemeeter"].as<int>();
-    if (result.count("debug"))
+        LOG_DEBUG("Setting voicemeeter type: " + std::to_string(config.voicemeeterType));
+    }
+    if (result.count("debug")) {
         config.debug = true;
-    if (result.count("chime"))
+        LOG_DEBUG("Setting debug mode: true");
+    }
+    if (result.count("chime")) {
         config.chime = true;
-    if (result.count("monitor"))
+        LOG_DEBUG("Setting chime: true");
+    }
+    if (result.count("monitor")) {
         config.monitorDeviceUUID = result["monitor"].as<std::string>();
+        LOG_DEBUG("Setting monitor device UUID: " + config.monitorDeviceUUID);
+    }
     if (result.count("log")) {
         config.loggingEnabled = true;
         config.logFilePath = result["log"].as<std::string>();
+        LOG_DEBUG("Setting logging enabled with path: " + config.logFilePath);
     }
-    if (result.count("hidden"))
+    if (result.count("hidden")) {
         config.hideConsole = true;
-    if (result.count("toggle"))
+        LOG_DEBUG("Setting hide console: true");
+    }
+    if (result.count("toggle")) {
         config.toggleParam = result["toggle"].as<std::string>();
-    if (result.count("shutdown"))
+        LOG_DEBUG("Setting toggle parameter: " + config.toggleParam);
+    }
+    if (result.count("shutdown")) {
         config.shutdown = true;
-    if (result.count("help"))
+        LOG_DEBUG("Setting shutdown: true");
+    }
+    if (result.count("help")) {
         config.help = true;
-    if (result.count("version"))
+        LOG_DEBUG("Setting help: true");
+    }
+    if (result.count("version")) {
         config.version = true;
+        LOG_DEBUG("Setting version: true");
+    }
     if (result.count("polling")) {
         config.pollingEnabled = true;
         config.pollingInterval = result["polling"].as<int>();
+        LOG_DEBUG("Setting polling enabled with interval: " + std::to_string(config.pollingInterval));
     }
     if (result.count("startup-volume")) {
         config.startupVolumePercent = result["startup-volume"].as<int>();
+        LOG_DEBUG("Setting startup volume: " + std::to_string(config.startupVolumePercent));
     }
     if (result.count("startup-sound")) {
         config.startupSound = result["startup-sound"].as<bool>();
+        LOG_DEBUG("Setting startup sound: " + std::to_string(config.startupSound));
     }
+    if (result.count("max_volume")) {
+        config.maxVolumePercent = result["max_volume"].as<int>();
+        LOG_DEBUG("Setting max volume percent: " + std::to_string(config.maxVolumePercent));
+    }
+    if (result.count("min_volume")) {
+        config.minVolumePercent = result["min_volume"].as<int>();
+        LOG_DEBUG("Setting min volume percent: " + std::to_string(config.minVolumePercent));
+    }
+    if (result.count("toggle_command")) {
+        config.toggleCommand = result["toggle_command"].as<std::string>();
+        LOG_DEBUG("Setting toggle command: " + config.toggleCommand);
+    }
+
+    LOG_DEBUG("Finished applying command line options");
 }
 
 /**
  * @brief Handle special commands like --help, --version, --shutdown.
  */
 bool ConfigParser::HandleSpecialCommands(const Config& config) {
+    LOG_DEBUG("Handling special commands");
+
     if (config.help) {
-        // Typically, you would print the help message here using cxxopts.
-        // For demonstration, we're logging an info message.
-        LOG_INFO("Use --help to see available options.");
+        // Print the help message using cxxopts
+        cxxopts::Options options = CreateOptions();
+        std::cout << options.help() << std::endl;
         return true;
     }
 
     if (config.version) {
-        LOG_INFO("VoiceMirror Version 0.2.0-alpha");
+        // Construct the version string from Defconf.h constants
+        std::string versionStr = "VoiceMirror Version " +
+                                 std::to_string(VERSION_MAJOR) + "." +
+                                 std::to_string(VERSION_MINOR) + "." +
+                                 std::to_string(VERSION_PATCH);
+        if (std::string(VERSION_PRE_RELEASE).empty()) {
+            // No pre-release tag
+            // Do nothing extra
+        } else {
+            versionStr += "-" + std::string(VERSION_PRE_RELEASE);
+        }
+        LOG_INFO(versionStr);
         return true;
     }
 
     if (config.shutdown) {
+        LOG_DEBUG("Processing shutdown command");
         RAIIHandle hQuitEvent(OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME));
         if (hQuitEvent.get()) {
             bool signalResult = SetEvent(hQuitEvent.get());
@@ -260,62 +495,4 @@ bool ConfigParser::HandleSpecialCommands(const Config& config) {
     }
 
     return false;
-}
-
-/**
- * @brief Handle the overall configuration parsing.
- */
-void ConfigParser::HandleConfiguration(const std::string& configPath, Config& config) {
-    // Directly parse into Config structure
-    ParseConfigFile(configPath, config);
-    // Command-line options should already be applied before calling this function
-    // Alternatively, you can pass the parsed command-line options here as well
-}
-
-/**
- * @brief Parse the toggle parameter.
- */
-ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) {
-    ToggleConfig config;
-    size_t firstColon = toggleParam.find(':');
-    size_t secondColon = toggleParam.find(':', firstColon + 1);
-
-    if (firstColon == std::string::npos || secondColon == std::string::npos) {
-        throw std::runtime_error("Invalid toggle parameter format. Expected format: type:index1:index2");
-    }
-
-    config.type = toggleParam.substr(0, firstColon);
-    try {
-        config.index1 = std::stoi(toggleParam.substr(firstColon + 1, secondColon - firstColon - 1));
-        config.index2 = std::stoi(toggleParam.substr(secondColon + 1));
-    } catch (const std::exception& e) {
-        throw std::runtime_error("Invalid indices in toggle parameter: " + std::string(e.what()));
-    }
-
-    return config;
-}
-
-/**
- * @brief Setup the Logger based on the configuration.
- */
-bool ConfigParser::SetupLogging(const Config& config) {
-    LogLevel level = LogLevel::INFO;
-    if (config.debug) {
-        level = LogLevel::DEBUG;
-    }
-
-    bool enableFileLogging = config.loggingEnabled;
-    std::string filePath = config.logFilePath;
-
-    if (!Logger::Instance().Initialize(level, enableFileLogging, filePath)) {
-        std::cerr << "Failed to initialize Logger. Exiting application." << std::endl;
-        return false;
-    }
-
-    if (config.hideConsole && !config.loggingEnabled) {
-        LOG_ERROR("--hidden option requires --log to be specified.");
-        return false;
-    }
-
-    return true;
 }
