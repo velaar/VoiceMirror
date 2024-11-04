@@ -34,10 +34,14 @@ class VoicemeeterManager {
 public:
     // Constructor and Destructor
     VoicemeeterManager();
+    VoicemeeterManager(const VoicemeeterManager&) = delete;
+    VoicemeeterManager& operator=(const VoicemeeterManager&) = delete;
     ~VoicemeeterManager();
 
     // Initialization and Shutdown
     bool Initialize(int voicemeeterType);
+    
+
     void Shutdown();
     void ShutdownCommand();
     void RestartAudioEngine(int beforeRestartDelay = 2, int afterRestartDelay = 2);
@@ -62,10 +66,12 @@ public:
     void ListOutputs();
     void ListMonitorableDevices();
 
+    // Mutexes for thread safety
+    std::mutex toggleMutex;
+    std::mutex comInitMutex;
+    std::mutex channelMutex;
+
 private:
-    // COM Initialization
-    bool InitializeCOM();
-    void UninitializeCOM();
 
     // Voicemeeter Remote DLL Management
     bool LoadVoicemeeterRemote();
@@ -107,10 +113,7 @@ private:
     bool debugMode;
     bool comInitialized;
 
-    // Mutexes for thread safety
-    std::mutex toggleMutex;
-    std::mutex comInitMutex;
-    std::mutex channelMutex;
+
 
     // **Commented Out Unused Function Pointers**
     /*

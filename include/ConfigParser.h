@@ -7,15 +7,7 @@
 #include "Logger.h"
 #include "cxxopts.hpp"
 #include "Defconf.h"
-
-/**
- * @brief Structure to hold toggle configuration parameters.
- */
-struct ToggleConfig {
-    std::string type; ///< Type of channel ('input' or 'output').
-    int index1;       ///< First channel index.
-    int index2;       ///< Second channel index.
-};
+#include "VoicemeeterManager.h"
 
 /**
  * @brief Class responsible for parsing and validating configuration.
@@ -83,6 +75,8 @@ public:
      */
     bool SetupLogging(const Config& config);
 
+
+
 private:
     /**
      * @brief Trim whitespace from both ends of a string.
@@ -93,6 +87,23 @@ private:
 
     int argc_;         ///< Argument count
     char** argv_;      ///< Argument vector
+
+        /**
+     * @brief List all monitorable audio devices.
+     */
+    void ListMonitorableDevices();
+
+    /**
+     * @brief List all available Voicemeeter virtual inputs.
+     * @param vmManager Reference to the VoicemeeterManager instance.
+     */
+    void ListInputs(VoicemeeterManager& vmManager);
+
+    /**
+     * @brief List all available Voicemeeter virtual outputs.
+     * @param vmManager Reference to the VoicemeeterManager instance.
+     */
+    void ListOutputs(VoicemeeterManager& vmManager);
 };
 
 #endif // CONFIGPARSER_H

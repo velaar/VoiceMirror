@@ -11,7 +11,7 @@
 #include <functional>
 
 #include "VoicemeeterManager.h"
-#include "WindowsVolumeManager.h"
+#include "WindowsManager.h"
 #include "Defconf.h" // Include Defconf.h for constants
 
 class VolumeMirror {
@@ -26,6 +26,9 @@ public:
     void SetPollingMode(bool enabled, int interval);
 
     bool GetVoicemeeterVolume(float &volumePercent, bool &isMuted);
+    // Callback function for Windows volume changes
+    void OnWindowsVolumeChange(float newVolume, bool isMuted);
+
 
 private:
     // Immutable configuration
@@ -34,7 +37,7 @@ private:
     const float minDbm;
     const float maxDbm;
     VoicemeeterManager &vmManager;
-    VolumeUtils::WindowsVolumeManager windowsVolumeManager;
+    std::unique_ptr<WindowsManager> windowsVolumeManager;
 
     // State tracking
     float lastWindowsVolume;
@@ -66,8 +69,7 @@ private:
     // Flags to track origin of changes
     std::atomic<bool> changeFromWindows{false}; 
 
-    // Callback function for Windows volume changes
-    void OnWindowsVolumeChange(float newVolume, bool isMuted);
+
 
     // Monitor Voicemeeter parameters
     void MonitorVoicemeeter();

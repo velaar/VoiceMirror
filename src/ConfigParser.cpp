@@ -1,5 +1,3 @@
-// ConfigParser.cpp
-
 #include "ConfigParser.h"
 
 #include <fstream>
@@ -19,19 +17,9 @@
 // Include cxxopts for command-line option parsing
 #include "cxxopts.hpp"
 
-/**
- * @brief Constructor to initialize command-line arguments.
- * @param argc Argument count.
- * @param argv Argument vector.
- */
 ConfigParser::ConfigParser(int argc, char** argv)
     : argc_(argc), argv_(argv) {}
 
-/**
- * @brief Trim whitespace from both ends of a string.
- * @param str The string to trim.
- * @return A new trimmed string.
- */
 std::string ConfigParser::Trim(const std::string& str) {
     const std::string whitespace = " \t\r\n";
     size_t start = str.find_first_not_of(whitespace);
@@ -41,12 +29,6 @@ std::string ConfigParser::Trim(const std::string& str) {
     return str.substr(start, end - start + 1);
 }
 
-/**
- * @brief Parse the toggle parameter string into a ToggleConfig structure.
- * @param toggleParam The toggle parameter string in the format "type:index1:index2".
- * @return Parsed ToggleConfig structure.
- * @throws std::runtime_error if the toggle parameter format is invalid.
- */
 ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) {
     LOG_DEBUG("Parsing toggle parameter: " + toggleParam);
     ToggleConfig toggleConfig;
@@ -79,57 +61,33 @@ ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) 
     return toggleConfig;
 }
 
-/**
- * @brief Setup the Logger based on the configuration.
- * @param config The current configuration.
- * @return True if Logger setup was successful, false otherwise.
- */
 bool ConfigParser::SetupLogging(const Config& config) {
-    LOG_DEBUG("Setting up logging based on configuration.");
+    LogLevel level = config.debug ? LogLevel::DEBUG : LogLevel::INFO;
+    bool enableFileLogging = config.loggingEnabled;
+    const std::string& filePath = config.logFilePath;
 
-    if (config.loggingEnabled) {
-        try {
-            // Initialize with LogLevel::DEBUG if debug mode is enabled, else LogLevel::INFO
-            LogLevel level = config.debug ? LogLevel::DEBUG : LogLevel::INFO;
-            bool enableFileLogging = config.loggingEnabled;
-            const std::string& filePath = config.logFilePath;
-
-            if (!Logger::Instance().Initialize(level, enableFileLogging, filePath)) {
-                LOG_ERROR("Failed to initialize logger.");
-                return false;
-            }
-
-            LOG_INFO("Logging initialized. Log file: " + config.logFilePath);
-            return true;
-        } catch (const std::exception& e) {
-            LOG_ERROR("Failed to initialize logger: " + std::string(e.what()));
+    try {
+        if (!Logger::Instance().Initialize(level, enableFileLogging, filePath)) {
             return false;
         }
-    } else {
-        // Initialize logger without file logging
-        try {
-            Logger::Instance().Initialize(LogLevel::INFO, false, "");
-            LOG_INFO("Logging initialized without file logging.");
-            return true;
-        } catch (const std::exception& e) {
-            LOG_ERROR("Failed to initialize logger: " + std::string(e.what()));
-            return false;
+        
+        if (enableFileLogging) {
+            LOG_INFO("Logging initialized. Log file: " + filePath);
+        } else {
+            LOG_INFO("Logging initialized for console output.");
         }
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to initialize logger: " << e.what() << std::endl;
+        return false;
     }
 }
 
-/**
- * @brief Handle the overall configuration parsing.
- * @param configPath Path to the configuration file.
- * @param config Reference to the Config structure to populate.
- */
 void ConfigParser::HandleConfiguration(const std::string& configPath, Config& config) {
     LOG_DEBUG("Starting configuration handling.");
 
-    // Step 1: Parse configuration file
     ParseConfigFile(configPath, config);
 
-    // Step 2: Create and parse command-line options
     cxxopts::Options options = CreateOptions();
     cxxopts::ParseResult result;
     try {
@@ -139,29 +97,21 @@ void ConfigParser::HandleConfiguration(const std::string& configPath, Config& co
         throw;
     }
 
-    // Step 3: Validate command-line options
     ValidateOptions(result);
 
-    // Step 4: Apply command-line options to config
     ApplyCommandLineOptions(result, config);
 
-    // Step 5: Setup logging based on config
     if (!SetupLogging(config)) {
         throw std::runtime_error("Failed to setup logging.");
     }
 
-    // Step 6: Handle special commands
     if (HandleSpecialCommands(config)) {
-        // Special command was handled; exit the application
         exit(0);
     }
 
     LOG_DEBUG("Configuration handling completed.");
 }
 
-/**
- * @brief Parse the configuration file and populate the Config structure directly.
- */
 void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config) {
     std::ifstream configFile(configPath);
     if (!configFile.is_open()) {
@@ -192,7 +142,6 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
 
             LOG_DEBUG("Parsing config key: " + key + " = " + value);
 
-            // Directly assign to Config structure
             if (key == "list-monitor") {
                 config.listMonitor = (value == "true" || value == "1");
             } else if (key == "list-inputs") {
@@ -226,31 +175,21 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
                 config.toggleParam = value;
             } else if (key == "shutdown") {
                 config.shutdown = (value == "true" || value == "1");
-            } else if (key == "polling") {
+            } else if (key == "polling-interval") {
                 config.pollingEnabled = true;
                 config.pollingInterval = std::stoi(value);
-            } else if (key == "startup_volume") {
+            } else if (key == "startup-volume") {
                 config.startupVolumePercent = std::stoi(value);
-            } else if (key == "startup_sound") {
+            } else if (key == "startup-sound") {
                 config.startupSound = (value == "true" || value == "1");
-            } else if (key == "max_volume") {
-                config.maxVolumePercent = std::stoi(value);
-            } else if (key == "min_volume") {
-                config.minVolumePercent = std::stoi(value);
-            } else if (key == "toggle_command") {
-                config.toggleCommand = value;
             } else {
                 LOG_DEBUG("Unknown config key: " + key);
             }
-            // Add additional configuration keys as necessary
         }
     }
     LOG_DEBUG("Finished parsing config file");
 }
 
-/**
- * @brief Validate command-line options.
- */
 void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
     LOG_DEBUG("Validating command line options");
 
@@ -261,16 +200,6 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
             throw std::runtime_error("Channel index must be non-negative");
         }
     }
-    if (result.count("startup-volume")) {
-        int vol = result["startup-volume"].as<int>();
-        LOG_DEBUG("Validating startup volume: " + std::to_string(vol));
-        if (vol < DEFAULT_MIN_VOLUME_PERCENT || vol > DEFAULT_MAX_VOLUME_PERCENT) {
-            throw std::runtime_error("Startup volume must be between " +
-                                     std::to_string(DEFAULT_MIN_VOLUME_PERCENT) +
-                                     " and " + std::to_string(DEFAULT_MAX_VOLUME_PERCENT) + ".");
-        }
-    }
-
     if (result.count("voicemeeter")) {
         int type = result["voicemeeter"].as<int>();
         LOG_DEBUG("Validating voicemeeter type: " + std::to_string(type));
@@ -290,8 +219,8 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
         }
     }
 
-    if (result.count("polling")) {
-        int interval = result["polling"].as<int>();
+    if (result.count("polling-interval")) {
+        int interval = result["polling-interval"].as<int>();
         LOG_DEBUG("Validating polling interval: " + std::to_string(interval));
         if (interval < 10 || interval > 1000) {
             throw std::runtime_error("Polling interval must be between 10 and 1000 milliseconds");
@@ -301,9 +230,6 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
     LOG_DEBUG("Command line options validation complete");
 }
 
-/**
- * @brief Create and return the cxxopts::Options object.
- */
 cxxopts::Options ConfigParser::CreateOptions() {
     LOG_DEBUG("Creating command line options");
 
@@ -317,16 +243,14 @@ cxxopts::Options ConfigParser::CreateOptions() {
         ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
         ("M,list-monitor", "List monitorable audio devices and exit")
         ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
-        ("T,toggle", "Toggle mute between two channels when device is plugged/unplugged. Must use with -m // --monitor Format: type:index1:index2 (e.g., 'input:0:1')", cxxopts::value<std::string>())
         ("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_VOICEMEETER_TYPE)))
         ("i,index", "Specify the Voicemeeter virtual channel index to use", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_CHANNEL_INDEX)))
-        ("max", "Maximum dBm for Voicemeeter channel", cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MAX_DBM)))
         ("min", "Minimum dBm for Voicemeeter channel", cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MIN_DBM)))
-        ("p,polling", "Enable polling mode with optional interval in milliseconds", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))
+        ("max", "Maximum dBm for Voicemeeter channel", cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MAX_DBM)))
+        ("p,polling-interval", "Enable polling mode with interval in milliseconds", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))
         ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_STARTUP_VOLUME_PERCENT)))
-        ("max_volume", "Maximum allowed volume percentage", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_MAX_VOLUME_PERCENT)))
-        ("min_volume", "Minimum allowed volume percentage", cxxopts::value<int>()->default_value(std::to_string(DEFAULT_MIN_VOLUME_PERCENT)))
-        ("toggle_command", "Toggle command parameter", cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_COMMAND));
+        ("T,toggle", "Toggle parameter", cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_COMMAND))
+        ("d,debug", "Enable debug logging mode");
 
     options.add_options("Advanced")
         ("m,monitor", "Specify the monitor device UUID", cxxopts::value<std::string>()->default_value(DEFAULT_MONITOR_DEVICE_UUID))
@@ -341,9 +265,6 @@ cxxopts::Options ConfigParser::CreateOptions() {
     return options;
 }
 
-/**
- * @brief Apply command-line options directly to the Config structure.
- */
 void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, Config& config) {
     LOG_DEBUG("Applying command line options to config");
 
@@ -420,9 +341,9 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
         config.version = true;
         LOG_DEBUG("Setting version: true");
     }
-    if (result.count("polling")) {
+    if (result.count("polling-interval")) {
         config.pollingEnabled = true;
-        config.pollingInterval = result["polling"].as<int>();
+        config.pollingInterval = result["polling-interval"].as<int>();
         LOG_DEBUG("Setting polling enabled with interval: " + std::to_string(config.pollingInterval));
     }
     if (result.count("startup-volume")) {
@@ -433,45 +354,29 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
         config.startupSound = result["startup-sound"].as<bool>();
         LOG_DEBUG("Setting startup sound: " + std::to_string(config.startupSound));
     }
-    if (result.count("max_volume")) {
-        config.maxVolumePercent = result["max_volume"].as<int>();
-        LOG_DEBUG("Setting max volume percent: " + std::to_string(config.maxVolumePercent));
-    }
-    if (result.count("min_volume")) {
-        config.minVolumePercent = result["min_volume"].as<int>();
-        LOG_DEBUG("Setting min volume percent: " + std::to_string(config.minVolumePercent));
-    }
-    if (result.count("toggle_command")) {
-        config.toggleCommand = result["toggle_command"].as<std::string>();
+    if (result.count("toggle-command")) {
+        config.toggleCommand = result["toggle-command"].as<std::string>();
         LOG_DEBUG("Setting toggle command: " + config.toggleCommand);
     }
 
     LOG_DEBUG("Finished applying command line options");
 }
 
-/**
- * @brief Handle special commands like --help, --version, --shutdown.
- */
 bool ConfigParser::HandleSpecialCommands(const Config& config) {
     LOG_DEBUG("Handling special commands");
 
     if (config.help) {
-        // Print the help message using cxxopts
         cxxopts::Options options = CreateOptions();
         std::cout << options.help() << std::endl;
         return true;
     }
 
     if (config.version) {
-        // Construct the version string from Defconf.h constants
         std::string versionStr = "VoiceMirror Version " +
                                  std::to_string(VERSION_MAJOR) + "." +
                                  std::to_string(VERSION_MINOR) + "." +
                                  std::to_string(VERSION_PATCH);
-        if (std::string(VERSION_PRE_RELEASE).empty()) {
-            // No pre-release tag
-            // Do nothing extra
-        } else {
+        if (!std::string(VERSION_PRE_RELEASE).empty()) {
             versionStr += "-" + std::string(VERSION_PRE_RELEASE);
         }
         LOG_INFO(versionStr);

@@ -12,8 +12,9 @@
 #include "Logger.h"
 #include "VoicemeeterManager.h"
 #include "VolumeUtils.h"
-#include "WindowsVolumeManager.h"
-#include "Defconf.h" // Include Defconf.h for constants
+#include "WindowsManager.h"
+#include "Defconf.h" 
+#include "ConfigParser.h"
 
 using namespace VolumeUtils;
 
@@ -41,15 +42,15 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
       lastSoundPlayTime(std::chrono::steady_clock::now() - std::chrono::milliseconds(DEFAULT_POLLING_INTERVAL_MS + 10)),
       debounceDuration(DEBOUNCE_DURATION_MS) { // Initialize from Defconf.h
     // Initialize VolumeMirror state
-    // Get initial Windows volume and mute state using WindowsVolumeManager
-    float currentVolume = windowsVolumeManager.GetVolume();
+    // Get initial Windows volume and mute state using WindowsManager
+    float currentVolume = windowsVolumeManager->GetVolume();
     if (currentVolume >= 0.0f) {  // Valid volume retrieved
         lastWindowsVolume = currentVolume;
     } else {
         lastWindowsVolume = 0.0f;
     }
 
-    bool isMuted = windowsVolumeManager.GetMute();
+    bool isMuted = windowsVolumeManager->GetMute();
     lastWindowsMute = isMuted;
 
     // Retrieve initial Voicemeeter volume and mute state from VoicemeeterManager
@@ -63,20 +64,11 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
         lastVmMute = false;
     }
 
-    // Register callback with WindowsVolumeManager
-    windowsVolumeManager.RegisterVolumeChangeCallback(
-        [this](float newVolume, bool isMuted) { this->OnWindowsVolumeChange(newVolume, isMuted); });
-
-    LOG_DEBUG("VolumeMirror initialized successfully.");
 }
 
 // Destructor
 VolumeMirror::~VolumeMirror() {
     Stop();
-
-    // Unregister callback
-    windowsVolumeManager.UnregisterVolumeChangeCallback(
-        [this](float newVolume, bool isMuted) { this->OnWindowsVolumeChange(newVolume, isMuted); });
 
     // Join the monitoring thread if it's joinable
     if (monitorThread.joinable()) {
@@ -118,9 +110,7 @@ void VolumeMirror::Stop() {
     }
 
     LOG_INFO("VolumeMirror stopped.");
-}
-
-// Set polling mode and interval
+}// Set polling mode and interval
 void VolumeMirror::SetPollingMode(bool enabled, int interval) {
     pollingEnabled = enabled;
     pollingInterval = interval;
@@ -182,7 +172,7 @@ void VolumeMirror::MonitorVoicemeeter() {
                     lastVmVolume = vmVolume;
                     lastVmMute = vmMute;
 
-                    // Update Windows volume accordingly using WindowsVolumeManager
+                    // Update Windows volume accordingly using WindowsManager
                     ignoreWindowsChange = true;
                     UpdateWindowsVolume(vmVolume, vmMute);
                     ignoreWindowsChange = false;
@@ -227,12 +217,12 @@ void VolumeMirror::UpdateVoicemeeterVolume(float volumePercent, bool isMuted) {
 // Update Windows volume and mute state based on Voicemeeter volume
 void VolumeMirror::UpdateWindowsVolume(float volumePercent, bool isMuted) {
     try {
-        // Use WindowsVolumeManager to set volume and mute state
-        if (!windowsVolumeManager.SetVolume(volumePercent)) {
+        // Use WindowsManager to set volume and mute state
+        if (!windowsVolumeManager->SetVolume(volumePercent)) {
             LOG_ERROR("VolumeMirror: Failed to set Windows volume.");
         }
 
-        if (!windowsVolumeManager.SetMute(isMuted)) {
+        if (!windowsVolumeManager->SetMute(isMuted)) {
             LOG_ERROR("VolumeMirror: Failed to set Windows mute state.");
         }
 
