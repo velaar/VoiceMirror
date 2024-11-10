@@ -6,7 +6,10 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
-            "args": [],
+            "args": [
+                "--config",
+                "U:\\System\\Applications\\VoiceMirror\\VoiceMirror.conf"
+            ],            
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
@@ -32,7 +35,10 @@
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${command:cmake.launchTargetPath}",
-            "args": [],
+            "args": [
+                "--config",
+                "U:\\System\\Applications\\VoiceMirror\\VoiceMirror.conf"
+            ],   
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

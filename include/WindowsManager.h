@@ -1,80 +1,86 @@
-#ifndef WINDOWS_MANAGER_H
-#define WINDOWS_MANAGER_H
+#ifndef WINDOWSMANAGER_H
+#define WINDOWSMANAGER_H
+
+#include <audiopolicy.h>
+#include <endpointvolume.h>
+#include <mmdeviceapi.h>
+#include <windows.h>
+#include <wrl/client.h>
 
 #include <atomic>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
-#include <functional>
-#include <mmdeviceapi.h>
-#include <endpointvolume.h>
-#include "VoicemeeterManager.h"
-#include "Defconf.h"
 
+#include "RAIIHandle.h"
 
-class WindowsManager : public IMMNotificationClient, public IAudioEndpointVolumeCallback {
-public:
-    WindowsManager(const std::string& deviceUUID, ToggleConfig toggleConfig, VoicemeeterManager& manager);
+class WindowsManager : public IAudioEndpointVolumeCallback, public IMMNotificationClient {
+   public:
+    WindowsManager(const std::string& deviceUUID);
     ~WindowsManager();
 
-    // COM initialization and cleanup
-    bool InitializeCOM();
-    void UninitializeCOM();
+    bool SetVolume(float volumePercent);
+    bool SetMute(bool mute);
+    float GetVolume() const;
+    bool GetMute() const;
 
-    // Device state change handling
+    void RegisterVolumeChangeCallback(std::function<void(float, bool)> callback);
+    void UnregisterVolumeChangeCallback(std::function<void(float, bool)> callback);
+
+    void ListMonitorableDevices();
+
+    // Public methods for playing sounds
+    void PlayStartupSound();
+    void PlaySyncSound();
+
+    // IUnknown methods
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppvInterface) override;
+    STDMETHODIMP_(ULONG)
+    AddRef() override;
+    STDMETHODIMP_(ULONG)
+    Release() override;
+
+    // IAudioEndpointVolumeCallback methods
+    STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
+
+    // IMMNotificationClient methods
     STDMETHODIMP OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) override;
     STDMETHODIMP OnDeviceAdded(LPCWSTR pwstrDeviceId) override;
     STDMETHODIMP OnDeviceRemoved(LPCWSTR pwstrDeviceId) override;
     STDMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId) override;
     STDMETHODIMP OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) override;
 
-    // Audio control
-    bool SetVolume(float volumePercent);
-    bool SetMute(bool mute);
-    float GetVolume() const;
-    bool GetMute() const;
+    // Callbacks for device plug/unplug events
+    std::function<void()> onDevicePluggedIn;
+    std::function<void()> onDeviceUnplugged;
 
-    // Volume change callback registration
-    void RegisterVolumeChangeCallback(std::function<void(float, bool)> callback);
-    void UnregisterVolumeChangeCallback(std::function<void(float, bool)> callback);
-
-    // Reference counting (IUnknown)
-    STDMETHODIMP QueryInterface(REFIID riid, void** ppvInterface) override;
-    STDMETHODIMP_(ULONG) AddRef() override;
-    STDMETHODIMP_(ULONG) Release() override;
-
-    // Volume notification
-    STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
-
-private:
-    // COM interfaces initialization
+   private:
+    bool InitializeCOM();
+    void UninitializeCOM();
     bool InitializeCOMInterfaces();
     void Cleanup();
     void ReinitializeCOMInterfaces();
 
-    // Device monitoring functions
     void CheckDevice(LPCWSTR deviceId, bool isAdded);
     void HandleDevicePluggedIn();
     void HandleDeviceUnplugged();
-    void ToggleMute(const std::string& type, int index1, int index2, bool isPluggedIn);
 
-    // Member variables
+    static std::string WideStringToUTF8(const std::wstring& wideStr);
+
     std::atomic<ULONG> refCount;
-    HANDLE comInitMutex; 
-    bool comInitialized;
-    std::string targetDeviceUUID;
-    ToggleConfig toggleConfig;
-    VoicemeeterManager& voicemeeterManager;
-    bool isToggled;
-
-    // Callback related
+    mutable std::mutex soundMutex;
     std::mutex callbackMutex;
     std::vector<std::function<void(float, bool)>> callbacks;
 
-    // COM pointers for device management
     Microsoft::WRL::ComPtr<IMMDeviceEnumerator> deviceEnumerator;
     Microsoft::WRL::ComPtr<IMMDevice> speakers;
     Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpointVolume;
+
+    // RAII wrapper for HANDLE
+    RAIIHandle comInitMutex;
+    bool comInitialized;
+    std::string targetDeviceUUID;
 };
 
-#endif // WINDOWS_MANAGER_H
+#endif  // WINDOWSMANAGER_H

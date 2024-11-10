@@ -1,98 +1,42 @@
 #include "WindowsManager.h"
 
+#include <audiopolicy.h>
 #include <endpointvolume.h>
+#include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <windows.h>
+#include <wrl/client.h>
+#include <propvarutil.h>
 
-#include <chrono>
-
+#include "Defconf.h"
 #include "Logger.h"
-#include "VoicemeeterManager.h"
+#include "VolumeUtils.h"
 
-// Initialize COM library
-bool WindowsManager::InitializeCOM() {
-    HANDLE hMutex = CreateMutexA(NULL, FALSE, COM_INIT_MUTEX_NAME);
-    if (hMutex) {
-        WaitForSingleObject(hMutex, INFINITE);
-        LOG_DEBUG("Attempting to initialize COM library");
+#pragma comment(lib, "Ole32.lib")
 
-        if (!comInitialized) {
-            HRESULT hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+using Microsoft::WRL::ComPtr;
 
-            if (SUCCEEDED(hr)) {
-                comInitialized = true;
-                LOG_DEBUG("COM library initialized successfully.");
-                ReleaseMutex(hMutex);
-                CloseHandle(hMutex);
-                return true;
-            } else if (hr == RPC_E_CHANGED_MODE) {
-                LOG_DEBUG("COM already initialized with a different threading model.");
-                ReleaseMutex(hMutex);
-                CloseHandle(hMutex);
-                return true;
-            } else {
-                LOG_ERROR("Failed to initialize COM library. HRESULT: " + std::to_string(hr));
-                ReleaseMutex(hMutex);
-                CloseHandle(hMutex);
-                return false;
-            }
-        }
-        ReleaseMutex(hMutex);
-        CloseHandle(hMutex);
-    }
-    return true;
-}
-
-// Uninitialize COM library
-void WindowsManager::UninitializeCOM() {
-    WaitForSingleObject(comInitMutex, INFINITE);
-    if (!endpointVolume || !endpointVolume.Get()) {
-        const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-        if (!endpointVolume || !endpointVolume.Get()) {
-            ReleaseMutex(comInitMutex);
-            return;
-        }
-    }
-    if (comInitialized) {
-        ::CoUninitialize();
-        comInitialized = false;
-        LOG_DEBUG("COM library uninitialized successfully.");
-    }
-}
-
-// Constructor: Initialize COM, volume control, and device monitoring
-WindowsManager::WindowsManager(const std::string& deviceUUID, ToggleConfig toggleConfig, VoicemeeterManager& manager)
+WindowsManager::WindowsManager(const std::string& deviceUUID)
     : refCount(1),
       comInitMutex(CreateMutexA(NULL, FALSE, COM_INIT_MUTEX_NAME)),
       comInitialized(false),
-      voicemeeterManager(manager),
-      targetDeviceUUID(deviceUUID),
-      toggleConfig(toggleConfig),
-      isToggled(false) {
-    // Initialize mutex first
-    comInitMutex = CreateMutexA(NULL, FALSE, COM_INIT_MUTEX_NAME);
-    if (!comInitMutex) {
+      targetDeviceUUID(deviceUUID) {
+    if (!comInitMutex.get()) {
         throw std::runtime_error("Failed to create COM init mutex");
     }
-
-    // Then initialize COM and interfaces
     try {
         if (!InitializeCOM()) {
             throw std::runtime_error("COM initialization failed");
         }
-
         if (!InitializeCOMInterfaces()) {
             throw std::runtime_error("COM interfaces initialization failed");
         }
-
         HRESULT hr = endpointVolume->RegisterControlChangeNotify(this);
         if (FAILED(hr)) {
             throw std::runtime_error("Volume notification registration failed: " + std::to_string(hr));
         }
-
-        LOG_DEBUG("WindowsManager initialized successfully for UUID: " + targetDeviceUUID);
     } catch (const std::exception& e) {
-        LOG_ERROR("WindowsManager initialization failed: " + std::string(e.what()));
+        LOG_DEBUG(std::string("Exception caught: ") + e.what());
         Cleanup();
         throw;
     }
@@ -102,11 +46,50 @@ WindowsManager::~WindowsManager() {
     if (endpointVolume) {
         endpointVolume->UnregisterControlChangeNotify(this);
     }
-    if (comInitMutex) {
-        CloseHandle(comInitMutex);
-    }
     Cleanup();
     UninitializeCOM();
+}
+
+bool WindowsManager::InitializeCOM() {
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (!comInitialized) {
+        HRESULT hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (SUCCEEDED(hr)) {
+            comInitialized = true;
+            return true;
+        } else if (hr == RPC_E_CHANGED_MODE) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+void WindowsManager::UninitializeCOM() {
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (comInitialized) {
+        ::CoUninitialize();
+        comInitialized = false;
+    }
+}
+
+bool WindowsManager::InitializeCOMInterfaces() {
+    HRESULT hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator),
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        __uuidof(IMMDeviceEnumerator),
+        reinterpret_cast<void**>(deviceEnumerator.GetAddressOf()));
+    if (FAILED(hr)) return false;
+    hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &speakers);
+    if (FAILED(hr)) return false;
+    hr = speakers->Activate(
+        __uuidof(IAudioEndpointVolume),
+        CLSCTX_INPROC_SERVER,
+        nullptr,
+        reinterpret_cast<void**>(endpointVolume.GetAddressOf()));
+    return SUCCEEDED(hr);
 }
 
 void WindowsManager::Cleanup() {
@@ -118,344 +101,59 @@ void WindowsManager::Cleanup() {
     deviceEnumerator.Reset();
 }
 
-// Device state change handling methods (from DeviceMonitor)
-STDMETHODIMP WindowsManager::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) {
-    LOG_DEBUG("OnDeviceStateChanged called for Device ID: " + std::to_string(dwNewState));
-    if (dwNewState == DEVICE_STATE_ACTIVE) {
-        CheckDevice(pwstrDeviceId, true);
-    } else if (dwNewState == DEVICE_STATE_DISABLED) {
-        CheckDevice(pwstrDeviceId, false);
+void WindowsManager::ReinitializeCOMInterfaces() {
+    std::lock_guard<std::mutex> lock(soundMutex);
+    Cleanup();
+    if (!InitializeCOMInterfaces()) {
+        throw std::runtime_error("COM interface reinitialization failed");
     }
-    return S_OK;
-}
-
-void WindowsManager::CheckDevice(LPCWSTR deviceId, bool isAdded) {
-    std::wstring ws(deviceId);
-    int size_needed = ::WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), static_cast<int>(ws.length()), NULL, 0, NULL, NULL);
-    std::string deviceUUID(size_needed, 0);
-    ::WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), static_cast<int>(ws.length()), &deviceUUID[0], size_needed, NULL, NULL);
-
-    LOG_DEBUG("Checking device UUID: " + deviceUUID);
-
-    if (deviceUUID == targetDeviceUUID) {
-        if (isAdded) {
-            HandleDevicePluggedIn();
-        } else {
-            HandleDeviceUnplugged();
-        }
-    }
-}
-
-void WindowsManager::HandleDevicePluggedIn() {
-    std::lock_guard<std::mutex> lock(voicemeeterManager.toggleMutex);
-    LOG_INFO("Monitored device has been plugged in.");
-    voicemeeterManager.RestartAudioEngine();
-
-    if (!toggleConfig.type.empty()) {
-        ToggleMute(toggleConfig.type, toggleConfig.index1, toggleConfig.index2, true);
-    }
-}
-
-void WindowsManager::HandleDeviceUnplugged() {
-    std::lock_guard<std::mutex> lock(voicemeeterManager.toggleMutex);
-    LOG_INFO("Monitored device has been unplugged.");
-
-    if (!toggleConfig.type.empty()) {
-        ToggleMute(toggleConfig.type, toggleConfig.index1, toggleConfig.index2, false);
-    }
-}
-
-STDMETHODIMP WindowsManager::OnDeviceAdded(LPCWSTR) {
-    LOG_DEBUG("Device added");
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnDeviceRemoved(LPCWSTR) {
-    LOG_DEBUG("Device removed");
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) {
-    LOG_DEBUG("Default device changed");
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) {
-    // Implementation of property value change event
-    LOG_DEBUG("Property value changed");
-    return S_OK;
-}
-
-void WindowsManager::ToggleMute(const std::string& type, int index1, int index2, bool isPluggedIn) {
-    ChannelType channelType;
-
-    if (type == "input") {
-        channelType = ChannelType::Input;
-    } else if (type == "output") {
-        channelType = ChannelType::Output;
-    } else {
-        LOG_ERROR("Invalid toggle type: " + type);
-        return;
-    }
-
-    if (isPluggedIn) {
-        voicemeeterManager.SetMute(index1, channelType, false);
-        voicemeeterManager.SetMute(index2, channelType, true);
-        LOG_INFO("Device Plugged: Unmuted " + type + ":" + std::to_string(index1) +
-                 ", Muted " + type + ":" + std::to_string(index2));
-        isToggled = true;
-    } else {
-        voicemeeterManager.SetMute(index1, channelType, true);
-        voicemeeterManager.SetMute(index2, channelType, false);
-        LOG_INFO("Device Unplugged: Muted " + type + ":" + std::to_string(index1) +
-                 ", Unmuted " + type + ":" + std::to_string(index2));
-        isToggled = false;
-    }
-}
-
-// Initialize COM interfaces
-bool WindowsManager::InitializeCOMInterfaces() {
-    HRESULT hr;
-
-    // Create device enumerator with proper type casting
-    hr = CoCreateInstance(
-        __uuidof(MMDeviceEnumerator),
-        nullptr,
-        CLSCTX_INPROC_SERVER,
-        __uuidof(IMMDeviceEnumerator),
-        reinterpret_cast<void**>(deviceEnumerator.GetAddressOf()));
-    if (FAILED(hr)) {
-        LOG_ERROR("MMDeviceEnumerator creation failed: " + std::to_string(hr));
-        return false;
-    }
-
-    // Get default audio endpoint
-    hr = deviceEnumerator->GetDefaultAudioEndpoint(eRender, eMultimedia, &speakers);
-    if (FAILED(hr)) {
-        LOG_ERROR("Default audio endpoint retrieval failed: " + std::to_string(hr));
-        return false;
-    }
-
-    // Activate audio endpoint volume interface with proper type casting
-    hr = speakers->Activate(
-        __uuidof(IAudioEndpointVolume),
-        CLSCTX_INPROC_SERVER,
-        nullptr,
-        reinterpret_cast<void**>(endpointVolume.GetAddressOf()));
-    if (FAILED(hr)) {
-        LOG_ERROR("Audio endpoint volume activation failed: " + std::to_string(hr));
-        return false;
-    }
-
-    return true;
 }
 
 bool WindowsManager::SetVolume(float volumePercent) {
-    try {
-        WaitForSingleObject(comInitMutex, INFINITE);
-        if (!endpointVolume || !endpointVolume.Get()) {
-            const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-            if (!endpointVolume || !endpointVolume.Get()) {
-                ReleaseMutex(comInitMutex);
-                return false;
-            }
-        }
-
-        if (!endpointVolume) {
-            ReinitializeCOMInterfaces();
-        }
-
-        if (volumePercent < 0.0f || volumePercent > 100.0f) {
-            LOG_ERROR("Invalid volume percentage: " + std::to_string(volumePercent));
-            return false;
-        }
-
-        float scalar = VolumeUtils::PercentToScalar(volumePercent);
-        HRESULT hr = endpointVolume->SetMasterVolumeLevelScalar(scalar, nullptr);
-
-        if (FAILED(hr)) {
-            LOG_ERROR("Volume setting failed: " + std::to_string(hr));
-            return false;
-        }
-
-        LOG_DEBUG("Volume set to " + std::to_string(volumePercent) + "%");
-        return true;
-    } catch (const std::exception& e) {
-        LOG_ERROR("SetVolume exception: " + std::string(e.what()));
-        return false;
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (!endpointVolume) {
+        ReinitializeCOMInterfaces();
     }
+    if (volumePercent < 0.0f || volumePercent > 100.0f) return false;
+    float scalar = VolumeUtils::PercentToScalar(volumePercent);
+    return SUCCEEDED(endpointVolume->SetMasterVolumeLevelScalar(scalar, nullptr));
 }
 
 bool WindowsManager::SetMute(bool mute) {
-    try {
-        WaitForSingleObject(comInitMutex, INFINITE);
-        if (!endpointVolume || !endpointVolume.Get()) {
-            const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-            if (!endpointVolume || !endpointVolume.Get()) {
-                ReleaseMutex(comInitMutex);
-                return false;
-            }
-        }
-
-        if (!endpointVolume) {
-            ReinitializeCOMInterfaces();
-        }
-
-        HRESULT hr = endpointVolume->SetMute(mute, nullptr);
-        if (FAILED(hr)) {
-            LOG_ERROR("SetMute failed: " + std::to_string(hr));
-            return false;
-        }
-
-        LOG_DEBUG("Mute state set to: " + std::string(mute ? "muted" : "unmuted"));
-        return true;
-    } catch (const std::exception& e) {
-        LOG_ERROR("SetMute exception: " + std::string(e.what()));
-        return false;
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (!endpointVolume) {
+        ReinitializeCOMInterfaces();
     }
+    return SUCCEEDED(endpointVolume->SetMute(mute, nullptr));
 }
 
 float WindowsManager::GetVolume() const {
-    try {
-        if (!comInitMutex) {
-            LOG_ERROR("COM init mutex is null");
-            return -1.0f;
-        }
-        WaitForSingleObject(comInitMutex, INFINITE);
-        if (!endpointVolume || !endpointVolume.Get()) {
-            const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-            if (!endpointVolume || !endpointVolume.Get()) {
-                ReleaseMutex(comInitMutex);
-                return -1.0f;
-            }
-        }
-
-        if (!endpointVolume || !endpointVolume.Get()) {
-            const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-            if (!endpointVolume || !endpointVolume.Get()) {
-                return -1.0f;
-            }
-        }
-
-        float currentVolume = 0.0f;
-        HRESULT hr = endpointVolume->GetMasterVolumeLevelScalar(&currentVolume);
-
-        if (FAILED(hr)) {
-            LOG_ERROR("GetVolume failed: " + std::to_string(hr));
-            return -1.0f;
-        }
-
-        return VolumeUtils::ScalarToPercent(currentVolume);
-    } catch (const std::exception& e) {
-        LOG_ERROR("GetVolume exception: " + std::string(e.what()));
-        return -1.0f;
-    }
-}
-  void WindowsManager::ReinitializeCOMInterfaces() {
-      ReleaseMutex(comInitMutex);
-      Cleanup();
-      LOG_DEBUG("Reinitializing COM interfaces");
-
-      if (!InitializeCOMInterfaces()) {
-          WaitForSingleObject(comInitMutex, INFINITE);
-          throw std::runtime_error("COM interface reinitialization failed");
-      }
-      WaitForSingleObject(comInitMutex, INFINITE);
-  }
-
-// IUnknown implementation
-STDMETHODIMP WindowsManager::QueryInterface(REFIID riid, void** ppvObject) {
-    if (!ppvObject) return E_POINTER;
-
-    if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback)) {
-        AddRef();
-        *ppvObject = static_cast<IAudioEndpointVolumeCallback*>(this);
-        return S_OK;
-    }
-
-    *ppvObject = nullptr;
-    return E_NOINTERFACE;
-}
-
-STDMETHODIMP_(ULONG)
-WindowsManager::AddRef() {
-    return ++refCount;  // Use pre-increment operator
-}
-
-STDMETHODIMP_(ULONG)
-WindowsManager::Release() {
-    ULONG ulRef = --refCount;  // Use pre-decrement operator
-    if (ulRef == 0) {
-        delete this;
-    }
-    return ulRef;
-}
-
-STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
-    if (!pNotify) return E_POINTER;
-    WaitForSingleObject(comInitMutex, INFINITE);
-    if (!endpointVolume || !endpointVolume.Get()) {
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (!endpointVolume) {
         const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-        if (!endpointVolume || !endpointVolume.Get()) {
-            ReleaseMutex(comInitMutex);
-            return false;
-        }
     }
-
-    try {
-        if (!deviceEnumerator || !speakers || !endpointVolume) {
-            LOG_DEBUG("COM interfaces invalid, attempting reinitialization");
-            ReinitializeCOMInterfaces();
-            if (!deviceEnumerator || !speakers || !endpointVolume) {
-                return E_FAIL;
-            }
-        }
-
-        float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
-        bool newMute = (pNotify->bMuted != FALSE);
-
-        std::vector<std::function<void(float, bool)>> callbacksCopy;
-        {
-            std::lock_guard<std::mutex> lock(callbackMutex);
-            callbacksCopy = callbacks;
-        }
-
-        for (const auto& callback : callbacksCopy) {
-            if (callback) {
-                callback(newVolume, newMute);
-            }
-        }
-        return S_OK;
-    } catch (...) {
-        LOG_ERROR("Exception in OnNotify");
-        return E_UNEXPECTED;
+    float currentVolume = 0.0f;
+    if (SUCCEEDED(endpointVolume->GetMasterVolumeLevelScalar(&currentVolume))) {
+        return VolumeUtils::ScalarToPercent(currentVolume);
     }
+    return -1.0f;
 }
 
 bool WindowsManager::GetMute() const {
-    try {
-        if (!endpointVolume) {
-            const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
-        }
-
-        BOOL muted;
-        HRESULT hr = endpointVolume->GetMute(&muted);
-
-        if (FAILED(hr)) {
-            LOG_ERROR("GetMute failed: " + std::to_string(hr));
-            return false;
-        }
-
-        return muted != FALSE;
-    } catch (const std::exception& e) {
-        LOG_ERROR("GetMute exception: " + std::string(e.what()));
-        return false;
+    std::lock_guard<std::mutex> lock(soundMutex);
+    if (!endpointVolume) {
+        const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
     }
+    BOOL muted = FALSE;
+    if (SUCCEEDED(endpointVolume->GetMute(&muted))) {
+        return muted != FALSE;
+    }
+    return false;
 }
 
 void WindowsManager::RegisterVolumeChangeCallback(std::function<void(float, bool)> callback) {
     std::lock_guard<std::mutex> lock(callbackMutex);
-    callbacks.push_back(callback);
+    callbacks.emplace_back(std::move(callback));
 }
 
 void WindowsManager::UnregisterVolumeChangeCallback(std::function<void(float, bool)> callback) {
@@ -466,4 +164,198 @@ void WindowsManager::UnregisterVolumeChangeCallback(std::function<void(float, bo
                            return cb.target_type() == callback.target_type();
                        }),
         callbacks.end());
+}
+
+STDMETHODIMP WindowsManager::QueryInterface(REFIID riid, void** ppvInterface) {
+    if (!ppvInterface) return E_POINTER;
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback) || riid == __uuidof(IMMNotificationClient)) {
+        AddRef();
+        *ppvInterface = static_cast<IAudioEndpointVolumeCallback*>(this);
+        return S_OK;
+    }
+    *ppvInterface = nullptr;
+    return E_NOINTERFACE;
+}
+
+STDMETHODIMP_(ULONG) WindowsManager::AddRef() {
+    return refCount.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+STDMETHODIMP_(ULONG) WindowsManager::Release() {
+    ULONG ulRef = refCount.fetch_sub(1, std::memory_order_relaxed) - 1;
+    if (ulRef == 0) delete this;
+    return ulRef;
+}
+
+STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
+    if (!pNotify) return E_POINTER;
+    float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
+    bool newMute = (pNotify->bMuted != FALSE);
+    std::vector<std::function<void(float, bool)>> callbacksCopy;
+    {
+        std::lock_guard<std::mutex> lock(callbackMutex);
+        callbacksCopy = callbacks;
+    }
+    for (const auto& callback : callbacksCopy) {
+        if (callback) callback(newVolume, newMute);
+    }
+    return S_OK;
+}
+
+STDMETHODIMP WindowsManager::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) {
+    if (dwNewState == DEVICE_STATE_ACTIVE) {
+        CheckDevice(pwstrDeviceId, true);
+    } else if (dwNewState == DEVICE_STATE_DISABLED) {
+        CheckDevice(pwstrDeviceId, false);
+    }
+    return S_OK;
+}
+
+void WindowsManager::CheckDevice(LPCWSTR deviceId, bool isAdded) {
+    std::wstring ws(deviceId);
+    int size_needed = WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), static_cast<int>(ws.length()), NULL, 0, NULL, NULL);
+    std::string deviceUUID(size_needed, 0);
+    WideCharToMultiByte(CP_UTF8, 0, ws.c_str(), static_cast<int>(ws.length()), &deviceUUID[0], size_needed, NULL, NULL);
+    if (deviceUUID == targetDeviceUUID) {
+        if (isAdded) HandleDevicePluggedIn();
+        else HandleDeviceUnplugged();
+    }
+}
+
+void WindowsManager::HandleDevicePluggedIn() {
+    if (onDevicePluggedIn) {
+        onDevicePluggedIn();
+    }
+}
+
+void WindowsManager::HandleDeviceUnplugged() {
+    if (onDeviceUnplugged) {
+        onDeviceUnplugged();
+    }
+}
+
+STDMETHODIMP WindowsManager::OnDeviceAdded(LPCWSTR) { return S_OK; }
+STDMETHODIMP WindowsManager::OnDeviceRemoved(LPCWSTR) { return S_OK; }
+STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) { return S_OK; }
+STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) { return S_OK; }
+
+void WindowsManager::PlayStartupSound() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const std::wstring soundFilePath = L"m95.mp3";
+    constexpr const wchar_t* aliasName = L"StartupSound";
+    std::wstring openCommand = L"open \"" + soundFilePath + L"\" type mpegvideo alias " + aliasName;
+    mciSendStringW(openCommand.c_str(), NULL, 0, NULL);
+    std::wstring playCommand = std::wstring(L"play ") + aliasName + L" wait";
+    mciSendStringW(playCommand.c_str(), NULL, 0, NULL);
+    std::wstring closeCommand = std::wstring(L"close ") + aliasName;
+    mciSendStringW(closeCommand.c_str(), NULL, 0, NULL);
+}
+
+void WindowsManager::PlaySyncSound() {
+    std::lock_guard<std::mutex> lock(soundMutex);
+    PlaySoundW(SYNC_SOUND_FILE_PATH, NULL, SND_FILENAME | SND_ASYNC);
+}
+
+static std::string WideStringToUTF8(const std::wstring& wideStr) {
+    if (wideStr.empty()) return "";
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), nullptr, 0, nullptr, nullptr);
+    if (sizeNeeded <= 0) return "Unknown Device";
+    std::string utf8Str(sizeNeeded, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), &utf8Str[0], sizeNeeded, nullptr, nullptr);
+    return utf8Str;
+}
+
+void WindowsManager::ListMonitorableDevices() {
+    std::lock_guard<std::mutex> lock(soundMutex);
+
+    LOG_INFO("Listing Monitorable Devices:");
+
+    HRESULT hr = S_OK;
+
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator),
+        nullptr,
+        CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator),
+        reinterpret_cast<void**>(enumerator.GetAddressOf()));
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to create IMMDeviceEnumerator. HRESULT: " + std::to_string(hr));
+        return;
+    }
+
+    ComPtr<IMMDeviceCollection> deviceCollection;
+    hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &deviceCollection);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to enumerate audio endpoints. HRESULT: " + std::to_string(hr));
+        return;
+    }
+
+    UINT deviceCount = 0;
+    hr = deviceCollection->GetCount(&deviceCount);
+    if (FAILED(hr)) {
+        LOG_ERROR("Failed to get device count. HRESULT: " + std::to_string(hr));
+        return;
+    }
+
+    const std::string separator = "+---------+----------------------+";
+    LOG_INFO(separator);
+    LOG_INFO("| Index   | Device Name           |");
+    LOG_INFO(separator);
+
+    for (UINT i = 0; i < deviceCount; ++i) {
+        ComPtr<IMMDevice> device;
+        hr = deviceCollection->Item(i, &device);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to get device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+            continue;
+        }
+
+        ComPtr<IPropertyStore> propertyStore;
+        hr = device->OpenPropertyStore(STGM_READ, &propertyStore);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to open property store for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+            continue;
+        }
+
+        PROPVARIANT varName;
+        PropVariantInit(&varName);
+        hr = propertyStore->GetValue(PKEY_Device_FriendlyName, &varName);
+        if (FAILED(hr)) {
+            LOG_ERROR("Failed to get device name for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+            PropVariantClear(&varName);
+            continue;
+        }
+
+        std::wstring deviceNameW(varName.pwszVal);
+        std::string deviceName = WideStringToUTF8(deviceNameW);
+        PropVariantClear(&varName);
+
+        if (deviceName.length() > 22) {
+            deviceName = deviceName.substr(0, 19) + "...";
+        }
+
+        std::string indexStr = std::to_string(i);
+        while (indexStr.length() < 7) {
+            indexStr = " " + indexStr;
+        }
+
+        std::string deviceNameFormatted = deviceName;
+        while (deviceNameFormatted.length() < 22) {
+            deviceNameFormatted += " ";
+        }
+
+        LOG_INFO("| " + indexStr + " | " + deviceNameFormatted + " |");
+    }
+
+    LOG_INFO(separator);
+}
+
+std::string WindowsManager::WideStringToUTF8(const std::wstring& wideStr) {
+    if (wideStr.empty()) return "";
+    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), nullptr, 0, nullptr, nullptr);
+    if (sizeNeeded <= 0) return "Unknown Device";
+    std::string utf8Str(sizeNeeded, 0);
+    WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), &utf8Str[0], sizeNeeded, nullptr, nullptr);
+    return utf8Str;
 }

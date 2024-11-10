@@ -9,7 +9,8 @@
     {
       "name": "win-release-x64",
       "displayName": "Release (64-bit)",
-      "description": "Configure the project for Release build (64-bit) with maximum optimizations.",
+      "description": "Configure the project for Release build (64-bit) with maximum optimizations using NMake.",
+      "generator": "NMake Makefiles",
       "binaryDir": "${sourceDir}/build/win-release-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -19,14 +20,15 @@
         "CMAKE_RUNTIME_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/bin",
         "CMAKE_LIBRARY_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/lib",
         "CMAKE_ARCHIVE_OUTPUT_DIRECTORY": "${sourceDir}/build/win-release-x64/lib",
-        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:INTEL64 /arch:AVX2 /Ob2",
+        "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ot /GL /DNDEBUG /fp:fast /favor:INTEL64 /arch:AVX2",
         "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/LTCG"
       }
     },
     {
       "name": "win-debug-x64",
       "displayName": "Debug (64-bit)",
-      "description": "Configure the project for Debug build (64-bit).",
+      "description": "Configure the project for Debug build (64-bit) using NMake.",
+      "generator": "NMake Makefiles",
       "binaryDir": "${sourceDir}/build/win-debug-x64",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
@@ -43,7 +45,8 @@
     {
       "name": "win-release-x86",
       "displayName": "Release (32-bit)",
-      "description": "Configure the project for Release build (32-bit) with maximum optimizations.",
+      "description": "Configure the project for Release build (32-bit) with maximum optimizations using NMake.",
+      "generator": "NMake Makefiles",
       "binaryDir": "${sourceDir}/build/win-release-x86",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
@@ -60,7 +63,8 @@
     {
       "name": "win-debug-x86",
       "displayName": "Debug (32-bit)",
-      "description": "Configure the project for Debug build (32-bit)",
+      "description": "Configure the project for Debug build (32-bit) using NMake.",
+      "generator": "NMake Makefiles",
       "binaryDir": "${sourceDir}/build/win-debug-x86",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",

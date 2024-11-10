@@ -1,4 +1,5 @@
 // Defconf.h
+
 #pragma once
 
 #include <string>
@@ -29,6 +30,7 @@ constexpr const char* DEFAULT_LOG_FILE = "VoiceMirror.log";      // Default log 
 constexpr int DEFAULT_CHANNEL_INDEX = 3;          // Default channel index for audio routing
 constexpr int DEFAULT_VOICEMEETER_TYPE = 2;       // Default Voicemeeter type (2 = Banana)
 constexpr int DEFAULT_POLLING_INTERVAL_MS = 100;  // Default polling interval for status checks
+constexpr int DEBOUNCE_DURATION_MS = 50;          // Debounce duration in milliseconds
 
 // Retry settings for API initialization
 constexpr int MAX_RETRIES = 20;       // Maximum number of connection attempts
@@ -40,9 +42,6 @@ constexpr int RETRY_DELAY_MS = 1000;  // Delay between connection attempts (mill
 
 constexpr const wchar_t* SYNC_SOUND_FILE_PATH = L"C:\\Windows\\Media\\Windows Unlock.wav";  // Path to synchronization sound
 constexpr const wchar_t* SYNC_FALLBACK_SOUND_ALIAS = L"SystemAsterisk";                     // Fallback sound alias
-
-// Debounce duration in milliseconds
-constexpr int DEBOUNCE_DURATION_MS = 50;
 
 // -----------------------------
 // Audio Level Boundaries and Defaults
@@ -72,8 +71,6 @@ constexpr bool DEFAULT_DEBUG_MODE =
     false
 #endif
 ;                          // Default debug mode status
-
-
 
 constexpr bool DEFAULT_HIDDEN_CONSOLE = false;                      // Default console visibility
 constexpr bool DEFAULT_LOGGING_ENABLED = false;                     // Default logging status
@@ -109,7 +106,10 @@ constexpr const char* VERSION_PRE_RELEASE = "alpha";  // Pre-release tag (e.g., 
 enum VoicemeeterType {
     VOICEMEETER_BASIC = 1,
     VOICEMEETER_BANANA,
-    VOICEMEETER_POTATO
+    VOICEMEETER_POTATO,
+    VOICEMEETER_BASIC_X64,
+    VOICEMEETER_BANANA_X64,
+    VOICEMEETER_POTATO_X64,
 };
 
 // -----------------------------
@@ -121,7 +121,6 @@ enum class ChannelType {
     Output
 };
 
-
 /**
  * @brief Structure to hold toggle configuration parameters.
  */
@@ -131,55 +130,64 @@ struct ToggleConfig {
     int index2;       ///< Second channel index.
 };
 
+enum class ConfigSource {
+    Default,
+    ConfigFile,
+    CommandLine
+};
 
+template <typename T>
+struct ConfigOption {
+    T value;
+    ConfigSource source = ConfigSource::Default;
+};
 
 // -----------------------------
 // Configuration Structure
 // -----------------------------
-
 struct Config {
     // File Paths
-    std::string configFilePath = DEFAULT_CONFIG_FILE;  // Configuration file location
-    std::string logFilePath = DEFAULT_LOG_FILE;        // Log file location
+    ConfigOption<std::string> configFilePath = {DEFAULT_CONFIG_FILE, ConfigSource::Default};
+    ConfigOption<std::string> logFilePath = {DEFAULT_LOG_FILE, ConfigSource::Default};
 
     // Debugging and Logging
-    bool debug = DEFAULT_DEBUG_MODE;                // Enable debug logging
-    bool loggingEnabled = DEFAULT_LOGGING_ENABLED;  // Enable file logging
+    ConfigOption<bool> debug = {DEFAULT_DEBUG_MODE, ConfigSource::Default};
+    ConfigOption<bool> loggingEnabled = {DEFAULT_LOGGING_ENABLED, ConfigSource::Default};
 
     // Application Behavior
-    bool help = DEFAULT_HELP_FLAG;                      // Show help information
-    bool version = DEFAULT_VERSION_FLAG;                // Show version information
-    bool hideConsole = DEFAULT_HIDDEN_CONSOLE;          // Hide console window
-    bool shutdown = DEFAULT_SHUTDOWN_ENABLED;           // Trigger application shutdown
-    bool chime = DEFAULT_CHIME_ENABLED;                 // Play notification sounds
-    bool pollingEnabled = DEFAULT_POLLING_ENABLED;      // Enable status polling
-    bool startupSound = DEFAULT_STARTUP_SOUND_ENABLED;  // Play sound at startup
+    ConfigOption<bool> help = {DEFAULT_HELP_FLAG, ConfigSource::Default};
+    ConfigOption<bool> version = {DEFAULT_VERSION_FLAG, ConfigSource::Default};
+    ConfigOption<bool> hideConsole = {DEFAULT_HIDDEN_CONSOLE, ConfigSource::Default};
+    ConfigOption<bool> shutdown = {DEFAULT_SHUTDOWN_ENABLED, ConfigSource::Default};
+    ConfigOption<bool> chime = {DEFAULT_CHIME_ENABLED, ConfigSource::Default};
+    ConfigOption<bool> pollingEnabled = {DEFAULT_POLLING_ENABLED, ConfigSource::Default};
+    ConfigOption<bool> startupSound = {DEFAULT_STARTUP_SOUND_ENABLED, ConfigSource::Default};
 
     // Volume Settings
-    int startupVolumePercent = DEFAULT_STARTUP_VOLUME_PERCENT;  // Initial volume level
+    ConfigOption<int> startupVolumePercent = {DEFAULT_STARTUP_VOLUME_PERCENT, ConfigSource::Default};
 
     // Voicemeeter Settings
-    int voicemeeterType = DEFAULT_VOICEMEETER_TYPE;  // Voicemeeter variant selection (1: Basic, 2: Banana, 3: Potato)
-    int index = DEFAULT_CHANNEL_INDEX;               // Channel index for operations
+    ConfigOption<int> voicemeeterType = {DEFAULT_VOICEMEETER_TYPE, ConfigSource::Default};
+    ConfigOption<int> index = {DEFAULT_CHANNEL_INDEX, ConfigSource::Default};
 
     // Audio Levels
-    float maxDbm = DEFAULT_MAX_DBM;  // Maximum audio level
-    float minDbm = DEFAULT_MIN_DBM;  // Minimum audio level
+    ConfigOption<float> maxDbm = {DEFAULT_MAX_DBM, ConfigSource::Default};
+    ConfigOption<float> minDbm = {DEFAULT_MIN_DBM, ConfigSource::Default};
 
     // Device and Toggle Settings
-    std::string monitorDeviceUUID = DEFAULT_MONITOR_DEVICE_UUID;  // Audio monitoring device ID
-    std::string toggleParam = DEFAULT_TOGGLE_PARAM;               // Parameter to toggle
-    std::string toggleCommand = DEFAULT_TOGGLE_COMMAND;           // Toggle command parameter
+    ConfigOption<std::string> monitorDeviceUUID = {DEFAULT_MONITOR_DEVICE_UUID, ConfigSource::Default};
+    ConfigOption<std::string> toggleParam = {DEFAULT_TOGGLE_PARAM, ConfigSource::Default};
+    ConfigOption<std::string> toggleCommand = {DEFAULT_TOGGLE_COMMAND, ConfigSource::Default};
 
     // Polling Settings
-    int pollingInterval = DEFAULT_POLLING_INTERVAL_MS;  // Status polling frequency (milliseconds)
+    ConfigOption<int> pollingInterval = {DEFAULT_POLLING_INTERVAL_MS, ConfigSource::Default};
 
     // Channel Type
-    std::string type = DEFAULT_TYPE;  // Channel type selection ("input" or "output")
+    ConfigOption<std::string> type = {DEFAULT_TYPE, ConfigSource::Default};
 
     // Listing Flags
-    bool listMonitor = false;   // Flag to list monitor devices
-    bool listInputs = false;    // Flag to list Voicemeeter inputs
-    bool listOutputs = false;   // Flag to list Voicemeeter outputs
-    bool listChannels = false;  // Flag to list Voicemeeter channels
+    ConfigOption<bool> listMonitor = {false, ConfigSource::Default};
+    ConfigOption<bool> listInputs = {false, ConfigSource::Default};
+    ConfigOption<bool> listOutputs = {false, ConfigSource::Default};
+    ConfigOption<bool> listChannels = {false, ConfigSource::Default};
 };
