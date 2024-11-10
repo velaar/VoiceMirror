@@ -32,7 +32,7 @@ using namespace std::string_literals;
 
 // Application state encapsulation
 class Application {
-public:
+   public:
     Application() : g_running(true), exitFlag(false) {}
     std::atomic<bool> g_running;
     RAIIHandle g_hQuitEvent{nullptr};
@@ -87,6 +87,22 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    // Handle shutdown command if received
+    if (appConfig.shutdown.value) {
+        LOG_DEBUG("Shutdown command detected.");
+        RAIIHandle hQuitEvent(OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, FALSE, EVENT_NAME));
+        if (hQuitEvent.get()) {
+            if (SetEvent(hQuitEvent.get())) {
+                LOG_INFO("Shutdown signal sent to running instances.");
+            } else {
+                LOG_ERROR("Failed to signal quit event to running instances.");
+            }
+        } else {
+            LOG_INFO("No running instances found.");
+        }
+        return EXIT_SUCCESS;  // Exit after handling shutdown
+    }
+
     // Single-Instance Enforcement
     RAIIHandle rawMutex(CreateMutexA(NULL, FALSE, MUTEX_NAME));
     if (!rawMutex.get()) {
@@ -123,7 +139,7 @@ int main(int argc, char* argv[]) {
     vmrManager.SetDebugMode(appConfig.debug.value);
 
     if (!vmrManager.Initialize(appConfig.voicemeeterType.value)) {
-        LOG_ERROR("Failed to initialize Voicemeeter Manager.");
+        LOG_ERROR("Failed to initialize and log in to Voicemeeter.");
         Logger::Instance().Shutdown();
         return EXIT_FAILURE;
     }
@@ -158,6 +174,31 @@ int main(int argc, char* argv[]) {
         vmrManager.Shutdown();
         Logger::Instance().Shutdown();
         return EXIT_FAILURE;
+    }
+
+    // Apply toggle configuration on startup if monitor device is connected
+    windowsManager->onDevicePluggedIn = [&vmrManager, &appConfig]() {
+        ToggleConfig toggleConfig;
+        try {
+            toggleConfig = ConfigParser::ParseToggleParameter(appConfig.toggleParam.value);
+        } catch (const std::exception& ex) {
+            LOG_ERROR("Exception while parsing toggle parameter on startup: " + std::string(ex.what()));
+            return;
+        }
+
+        // Unmute index1 and mute index2 based on toggle configuration
+        ChannelType channelType = (toggleConfig.type == "input") ? ChannelType::Input : ChannelType::Output;
+        vmrManager.SetMute(toggleConfig.index1, channelType, false);
+        vmrManager.SetMute(toggleConfig.index2, channelType, true);
+
+        LOG_INFO("Applied toggle settings on startup: " + toggleConfig.type +
+                 " channel " + std::to_string(toggleConfig.index1) + " unmuted, " +
+                 "channel " + std::to_string(toggleConfig.index2) + " muted.");
+    };
+
+    // Call CheckDevice directly to see if device is already connected on startup
+    if (!appConfig.monitorDeviceUUID.value.empty()) {
+        windowsManager->CheckDevice(std::wstring(appConfig.monitorDeviceUUID.value.begin(), appConfig.monitorDeviceUUID.value.end()).c_str(), true);
     }
 
     // Handle listing of monitorable devices
@@ -200,28 +241,6 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    // Set startup volume if different from default
-    if (appConfig.startupVolumePercent.value != DEFAULT_STARTUP_VOLUME_PERCENT) {
-        LOG_DEBUG("Setting startup volume to " + std::to_string(appConfig.startupVolumePercent.value) + "%");
-
-        // Use a try-catch block for the volume setting operation
-        try {
-            if (windowsManager->SetVolume(static_cast<float>(appConfig.startupVolumePercent.value))) {
-                LOG_DEBUG("Startup volume set successfully.");
-
-                // Handle startup sound in a separate thread if enabled
-                if (appConfig.startupSound.value) {
-                    std::thread startupSoundThread(&WindowsManager::PlayStartupSound, windowsManager.get());
-                    startupSoundThread.detach();
-                }
-            } else {
-                LOG_ERROR("Failed to set startup volume.");
-            }
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Volume setting failed: " + std::string(ex.what()));
-        }
-    }
-
     int channelIndex = appConfig.index.value;
     const std::string& typeStr = appConfig.type.value;
     float minDbm = appConfig.minDbm.value;
@@ -253,6 +272,28 @@ int main(int argc, char* argv[]) {
         LOG_INFO("VoiceMirror is running. Press Ctrl+C to exit.");
 
         std::thread quitThread;
+
+        // Set startup volume if different from default
+        if (appConfig.startupVolumePercent.value != DEFAULT_STARTUP_VOLUME_PERCENT) {
+            LOG_DEBUG("Setting startup volume to " + std::to_string(appConfig.startupVolumePercent.value) + "%");
+
+            // Use a try-catch block for the volume setting operation
+            try {
+                if (windowsManager->SetVolume(static_cast<float>(appConfig.startupVolumePercent.value))) {
+                    LOG_DEBUG("Startup volume set successfully.");
+                } else {
+                    LOG_ERROR("Failed to set startup volume.");
+                }
+            } catch (const std::exception& ex) {
+                LOG_ERROR("Volume setting failed: " + std::string(ex.what()));
+            }
+        }
+        // Handle startup sound in a separate thread if enabled
+        if (appConfig.startupSound.value) {
+            std::thread startupSoundThread(&WindowsManager::PlayStartupSound, windowsManager.get());
+            startupSoundThread.detach();
+        }
+
         if (isMonitoring) {
             quitThread = std::thread([&appState]() {
                 while (appState.g_running.load()) {

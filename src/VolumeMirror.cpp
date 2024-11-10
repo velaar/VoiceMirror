@@ -6,6 +6,7 @@
 #include <chrono>
 #include <mutex>
 #include <thread>
+
 #include "Defconf.h"
 #include "Logger.h"
 #include "VolumeUtils.h"
@@ -34,10 +35,11 @@ VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
       playSoundOnSync(playSound),
       pollingEnabled(false),
       pollingInterval(DEFAULT_POLLING_INTERVAL_MS),
-      debounceDuration(DEBOUNCE_DURATION_MS),
-      changeFromWindows(false) {
-
+      debounceDuration(DEBOUNCE_DURATION_MS) {
     float currentVolume = windowsManager.GetVolume();
+    lastChangeSource = ChangeSource::Windows;
+    lastWindowsChangeTime = std::chrono::steady_clock::now() - std::chrono::milliseconds(debounceDuration);
+
     lastWindowsVolume = (currentVolume >= 0.0f) ? currentVolume : 0.0f;
 
     bool isMuted = windowsManager.GetMute();
@@ -137,11 +139,13 @@ void VolumeMirror::OnWindowsVolumeChange(float newVolume, bool isMuted) {
         vmManager.UpdateVoicemeeterVolume(channelIndex, channelType, newVolume, isMuted);
         ignoreVoicemeeterChange = false;
 
-        changeFromWindows = true;
+        lastChangeSource = ChangeSource::Windows;
+
+        // Update lastWindowsChangeTime
+        lastWindowsChangeTime = std::chrono::steady_clock::now();
     }
 }
 
-// Monitor Voicemeeter parameters in a separate thread
 void VolumeMirror::MonitorVoicemeeter() {
     std::chrono::steady_clock::time_point lastVmChangeTime =
         std::chrono::steady_clock::now() - std::chrono::milliseconds(debounceDuration);
@@ -161,19 +165,36 @@ void VolumeMirror::MonitorVoicemeeter() {
             if (vmManager.GetVoicemeeterVolume(channelIndex, channelType, vmVolume, vmMute)) {
                 LOG_DEBUG("Voicemeeter volume: " + std::to_string(vmVolume) + ", mute: " + std::to_string(vmMute));
 
-                if (vmVolume >= 0.0f &&
-                    (!VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume) || vmMute != lastVmMute)) {
-                    lastVmVolume = vmVolume;
-                    lastVmMute = vmMute;
+                // Always update lastVmVolume and lastVmMute
+                bool volumeChanged = !VolumeUtils::IsFloatEqual(vmVolume, lastVmVolume);
+                bool muteChanged = (vmMute != lastVmMute);
+                lastVmVolume = vmVolume;
+                lastVmMute = vmMute;
 
-                    ignoreWindowsChange = true;
-                    UpdateWindowsVolume(vmVolume, vmMute);
-                    ignoreWindowsChange = false;
+                if (vmVolume >= 0.0f && (volumeChanged || muteChanged)) {
+                    // Calculate time since last Windows change
+                    auto now = std::chrono::steady_clock::now();
+                    auto durationSinceLastWindowsChange = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastWindowsChangeTime);
 
-                    lastVmChangeTime = std::chrono::steady_clock::now();
-                    pendingSound = true;
+                    if (durationSinceLastWindowsChange.count() <= debounceDuration) {
+                        // Skip updating Windows to prevent the loop
+                        LOG_DEBUG("Voicemeeter volume change occurred shortly after Windows change. Skipping update to Windows.");
+                        // Do not update lastChangeSource here
+                    } else {
+                        ignoreWindowsChange = true;
+                        UpdateWindowsVolume(vmVolume, vmMute);
+                        ignoreWindowsChange = false;
 
-                    LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
+                        lastVmChangeTime = now;
+
+                        if (playSoundOnSync) {
+                            pendingSound = true;
+                            LOG_DEBUG("Voicemeeter volume change detected. Scheduling synchronization sound.");
+                        }
+
+                        // Update the last change source only when we have updated Windows volume
+                        lastChangeSource = ChangeSource::Voicemeeter;
+                    }
                 }
             }
         }
@@ -184,9 +205,7 @@ void VolumeMirror::MonitorVoicemeeter() {
 
             if (durationSinceLastChange.count() >= debounceDuration) {
                 LOG_DEBUG("Playing sync sound after debounce period");
-                if (playSoundOnSync) {
-                    windowsManager.PlaySyncSound();
-                }
+                windowsManager.PlaySyncSound();
                 pendingSound = false;
             }
         }
@@ -215,6 +234,11 @@ void VolumeMirror::UpdateWindowsVolume(float volumePercent, bool isMuted) {
         if (!windowsManager.SetMute(isMuted)) {
             LOG_ERROR("VolumeMirror: Failed to set Windows mute state.");
         }
+
+        lastWindowsVolume = volumePercent;
+        lastWindowsMute = isMuted;
+
+        lastChangeSource = ChangeSource::Voicemeeter;
 
         LOG_DEBUG("VolumeMirror: Windows volume updated to " + std::to_string(volumePercent) + "%" +
                   (isMuted ? " (Muted)" : " (Unmuted)"));

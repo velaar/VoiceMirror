@@ -12,10 +12,10 @@ class ConfigParser {
 public:
     ConfigParser(int argc, char** argv);
     void HandleConfiguration(Config& config);
-    ToggleConfig ParseToggleParameter(const std::string& toggleParam);
+    static ToggleConfig ParseToggleParameter(const std::string& toggleParam);
 
 private:
-    std::string Trim(const std::string& str);
+    static std::string Trim(const std::string& str);
     void ParseConfigFile(const std::string& configPath, Config& config);
     void ValidateOptions(const cxxopts::ParseResult& result);
     cxxopts::Options CreateOptions();

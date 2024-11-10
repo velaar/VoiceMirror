@@ -4,14 +4,11 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-
+#include "Defconf.h"
 #include "Logger.h"
 #include "VolumeUtils.h"
 
-#define DEFAULT_DLL_PATH_64 "C:\\Program Files\\VB\\Voicemeeter\\VoicemeeterRemote64.dll"
-#define DEFAULT_DLL_PATH_32 "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote.dll"
-#define MAX_RETRIES 10
-#define RETRY_DELAY_MS 500
+
 
 VoicemeeterManager::VoicemeeterManager()
     : VBVMR_Login(nullptr),
@@ -85,6 +82,7 @@ bool VoicemeeterManager::LoadVoicemeeterRemote() {
     initialized = true;
     return true;
 }
+
 
 // Unload Voicemeeter Remote DLL and reset function pointers
 void VoicemeeterManager::UnloadVoicemeeterRemote() {

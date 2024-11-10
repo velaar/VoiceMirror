@@ -29,6 +29,8 @@ private:
     void OnWindowsVolumeChange(float newVolume, bool isMuted);
     void MonitorVoicemeeter();
 
+    ChangeSource lastChangeSource;
+
     int channelIndex;
     ChannelType channelType;
     float minDbm;
@@ -42,19 +44,18 @@ private:
     float lastVmVolume;
     bool lastVmMute;
 
-    bool ignoreWindowsChange;
-    bool ignoreVoicemeeterChange;
+    std::atomic<bool> ignoreWindowsChange;
+    std::atomic<bool> ignoreVoicemeeterChange;
     bool running;
     bool playSoundOnSync;
     bool pollingEnabled;
     int pollingInterval;
     int debounceDuration;
-    std::atomic<bool> changeFromWindows;
 
     std::mutex vmMutex;
     std::mutex controlMutex;
     std::thread monitorThread;
     int refCount;
-
-    std::function<void(float, bool)> windowsVolumeCallback; // Added member variable to store the callback
+    std::chrono::steady_clock::time_point lastWindowsChangeTime;
+    std::function<void(float, bool)> windowsVolumeCallback;
 };

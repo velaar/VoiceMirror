@@ -2,17 +2,19 @@
 
 #include "ConfigParser.h"
 
+#include <windows.h>
+
 #include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
-#include "Logger.h"
-#include "cxxopts.hpp"
-#include "Defconf.h"
-#include "RAIIHandle.h"
-#include <iostream>
 #include <vector>
-#include <iomanip>
-#include <windows.h>
+
+#include "Defconf.h"
+#include "Logger.h"
+#include "RAIIHandle.h"
+#include "cxxopts.hpp"
 
 ConfigParser::ConfigParser(int argc, char** argv)
     : argc_(argc), argv_(argv) {}
@@ -62,7 +64,7 @@ bool ConfigParser::SetupLogging(const Config& config) {
         if (!Logger::Instance().Initialize(level, enableFileLogging, filePath)) {
             return false;
         }
-        
+
         if (enableFileLogging) {
             LOG_INFO("Logging initialized. Log file: " + filePath);
         } else {
@@ -116,15 +118,14 @@ void ConfigParser::ValidateConfig(const Config& config) {
         throw std::runtime_error("Channel index must be non-negative");
     }
 
-
     if (config.voicemeeterType.value < VOICEMEETER_BASIC || config.voicemeeterType.value > VOICEMEETER_POTATO_X64) {
         throw std::runtime_error("Voicemeeter type must be one of the following: " +
-                                std::to_string(VOICEMEETER_BASIC) + " (Basic), " +
-                                std::to_string(VOICEMEETER_BANANA) + " (Banana), " +
-                                std::to_string(VOICEMEETER_POTATO) + " (Potato), " +
-                                std::to_string(VOICEMEETER_BASIC_X64) + " (Basic x64), " +
-                                std::to_string(VOICEMEETER_BANANA_X64) + " (Banana x64), or " +
-                                std::to_string(VOICEMEETER_POTATO_X64) + " (Potato x64)");
+                                 std::to_string(VOICEMEETER_BASIC) + " (Basic), " +
+                                 std::to_string(VOICEMEETER_BANANA) + " (Banana), " +
+                                 std::to_string(VOICEMEETER_POTATO) + " (Potato), " +
+                                 std::to_string(VOICEMEETER_BASIC_X64) + " (Basic x64), " +
+                                 std::to_string(VOICEMEETER_BANANA_X64) + " (Banana x64), or " +
+                                 std::to_string(VOICEMEETER_POTATO_X64) + " (Potato x64)");
     }
 
     const std::string& type = Trim(config.type.value);
@@ -136,7 +137,11 @@ void ConfigParser::ValidateConfig(const Config& config) {
         throw std::runtime_error("Polling interval must be between 10 and 1000 milliseconds");
     }
 
-    // Add any additional validations as necessary
+    if (!(config.hotkeyVK.value >= 'A' && config.hotkeyVK.value <= 'Z') &&
+        !(config.hotkeyVK.value >= '0' && config.hotkeyVK.value <= '9')) {
+        throw std::runtime_error("Hotkey key must be an alphanumeric character.");
+    }
+
 }
 
 void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config) {
@@ -194,7 +199,14 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
                     config.startupVolumePercent.value = std::stoi(value);
                     config.startupVolumePercent.source = ConfigSource::ConfigFile;
                 }
-                // Additional parsing for other options if needed.
+                if (key == "hotkey_modifiers") {
+                    config.hotkeyModifiers.value = std::stoi(value);
+                    config.hotkeyModifiers.source = ConfigSource::ConfigFile;
+                } else if (key == "hotkey_key") {
+                    config.hotkeyVK.value = std::stoi(value);
+                    config.hotkeyVK.source = ConfigSource::ConfigFile;
+                }
+
             } catch (const std::exception& e) {
                 LOG_ERROR("Error parsing config key " + key + ": " + e.what());
             }
@@ -238,43 +250,24 @@ void ConfigParser::ValidateOptions(const cxxopts::ParseResult& result) {
 cxxopts::Options ConfigParser::CreateOptions() {
     cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
 
-    options.add_options()
-        ("C,chime", "Enable chime sound on sync from Voicemeeter to Windows")
-        ("L,list-channels", "List all Voicemeeter channels with their labels and exit")
-        ("S,shutdown", "Shutdown all instances of the app and exit immediately")
-        ("H,hidden", "Hide the console window. Use with --log to run without showing the console.")
-        ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
-        ("M,list-monitor", "List monitorable audio devices and exit")
-        ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)", 
-            cxxopts::value<int>()->default_value(std::to_string(DEFAULT_VOICEMEETER_TYPE)))
-        ("i,index", "Specify the Voicemeeter virtual channel index to use", 
-            cxxopts::value<int>()->default_value(std::to_string(DEFAULT_CHANNEL_INDEX)))
-        ("min", "Minimum dBm for Voicemeeter channel", 
-            cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MIN_DBM)))
-        ("max", "Maximum dBm for Voicemeeter channel", 
-            cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MAX_DBM)))
-        ("p,polling-interval", "Enable polling mode with interval in milliseconds", 
-            cxxopts::value<int>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))
-        ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", 
-            cxxopts::value<int>()->default_value(std::to_string(DEFAULT_STARTUP_VOLUME_PERCENT)))
-        ("T,toggle", "Toggle parameter", 
-            cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_COMMAND))
-        ("d,debug", "Enable debug logging mode")
-        ("c,config", "Path to configuration file", 
-            cxxopts::value<std::string>()->default_value(DEFAULT_CONFIG_FILE));
+    options.add_options()("C,chime", "Enable chime sound on sync from Voicemeeter to Windows")("L,list-channels", "List all Voicemeeter channels with their labels and exit")("S,shutdown", "Shutdown all instances of the app and exit immediately")("H,hidden", "Hide the console window. Use with --log to run without showing the console.")("I,list-inputs", "List available Voicemeeter virtual inputs and exit")("M,list-monitor", "List monitorable audio devices and exit")("O,list-outputs", "List available Voicemeeter virtual outputs and exit")("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              cxxopts::value<int>()->default_value(std::to_string(DEFAULT_VOICEMEETER_TYPE)))("i,index", "Specify the Voicemeeter virtual channel index to use",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              cxxopts::value<int>()->default_value(std::to_string(DEFAULT_CHANNEL_INDEX)))("min", "Minimum dBm for Voicemeeter channel",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MIN_DBM)))("max", "Maximum dBm for Voicemeeter channel",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    cxxopts::value<float>()->default_value(std::to_string(DEFAULT_MAX_DBM)))("p,polling-interval", "Enable polling mode with interval in milliseconds",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             cxxopts::value<int>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                cxxopts::value<int>()->default_value(std::to_string(DEFAULT_STARTUP_VOLUME_PERCENT)))("T,toggle", "Toggle parameter",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_COMMAND))("d,debug", "Enable debug logging mode")("c,config", "Path to configuration file",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    cxxopts::value<std::string>()->default_value(DEFAULT_CONFIG_FILE))("hm,hotkey-modifiers", "Hotkey modifiers (e.g., Ctrl=2, Alt=1, Shift=4)",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       cxxopts::value<int>()->default_value(std::to_string(DEFAULT_HOTKEY_MODIFIERS)))("hk,hotkey-key", "Hotkey virtual key code (e.g., R=82)",
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       cxxopts::value<int>()->default_value(std::to_string(DEFAULT_HOTKEY_VK)));
 
-    options.add_options("Advanced")
-        ("m,monitor", "Specify the monitor device UUID", 
-            cxxopts::value<std::string>()->default_value(DEFAULT_MONITOR_DEVICE_UUID))
-        ("log", "Enable logging with specified log file path", 
-            cxxopts::value<std::string>()->default_value(DEFAULT_LOG_FILE))
-        ("startup-sound", "Enable startup sound", 
-            cxxopts::value<bool>()->default_value("false"));
+    options.add_options("Advanced")("m,monitor", "Specify the monitor device UUID",
+                                    cxxopts::value<std::string>()->default_value(DEFAULT_MONITOR_DEVICE_UUID))("log", "Enable logging with specified log file path",
+                                                                                                               cxxopts::value<std::string>()->default_value(DEFAULT_LOG_FILE))("startup-sound", "Enable startup sound",
+                                                                                                                                                                               cxxopts::value<bool>()->default_value("false"));
 
-    options.add_options("Help")
-        ("help", "Print help")
-        ("version", "Print version");
+    options.add_options("Help")("help", "Print help")("version", "Print version");
 
     return options;
 }
@@ -376,6 +369,14 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
     if (result.count("toggle-command")) {
         config.toggleCommand.value = result["toggle-command"].as<std::string>();
         config.toggleCommand.source = ConfigSource::CommandLine;
+    }
+    if (result.count("hotkey-modifiers")) {
+        config.hotkeyModifiers.value = result["hotkey-modifiers"].as<int>();
+        config.hotkeyModifiers.source = ConfigSource::CommandLine;
+    }
+    if (result.count("hotkey-key")) {
+        config.hotkeyVK.value = result["hotkey-key"].as<int>();
+        config.hotkeyVK.source = ConfigSource::CommandLine;
     }
 }
 

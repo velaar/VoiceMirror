@@ -12,6 +12,7 @@
 #include "Logger.h"
 #include "VolumeUtils.h"
 
+
 #pragma comment(lib, "Ole32.lib")
 
 using Microsoft::WRL::ComPtr;
@@ -42,16 +43,9 @@ WindowsManager::WindowsManager(const std::string& deviceUUID)
     }
 }
 
-WindowsManager::~WindowsManager() {
-    if (endpointVolume) {
-        endpointVolume->UnregisterControlChangeNotify(this);
-    }
-    Cleanup();
-    UninitializeCOM();
-}
 
 bool WindowsManager::InitializeCOM() {
-    std::lock_guard<std::mutex> lock(soundMutex);
+    std::lock_guard<std::mutex> lock(comInitializedMutex);
     if (!comInitialized) {
         HRESULT hr = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
         if (SUCCEEDED(hr)) {
@@ -67,7 +61,7 @@ bool WindowsManager::InitializeCOM() {
 }
 
 void WindowsManager::UninitializeCOM() {
-    std::lock_guard<std::mutex> lock(soundMutex);
+    std::lock_guard<std::mutex> lock(comInitializedMutex);
     if (comInitialized) {
         ::CoUninitialize();
         comInitialized = false;
@@ -150,6 +144,121 @@ bool WindowsManager::GetMute() const {
     }
     return false;
 }
+
+
+// Initialize hotkey registration
+bool WindowsManager::InitializeHotkey() {
+    // Define and register a window class for the message-only window
+    const wchar_t CLASS_NAME[] = L"VoiceMirrorHotkeyWindowClass";
+
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = WindowsManager::WindowProc;
+    wc.hInstance = GetModuleHandleW(NULL);
+    wc.lpszClassName = CLASS_NAME;
+
+    if (!RegisterClassW(&wc)) {
+        DWORD error = GetLastError();
+        if (error != ERROR_CLASS_ALREADY_EXISTS) { // Ignore if already registered
+            LOG_ERROR("Failed to register hotkey window class. Error code: " + std::to_string(error));
+            return false;
+        }
+    }
+
+    // Create a message-only window
+    hwndHotkeyWindow = CreateWindowExW(
+        0,                  // Optional window styles
+        CLASS_NAME,         // Window class
+        L"Hotkey Window",   // Window name
+        0,                  // Window style
+        0, 0, 0, 0,          // Position and size
+        HWND_MESSAGE,       // Parent window (message-only)
+        NULL,               // Menu
+        wc.hInstance,       // Instance handle
+        this                // Additional application data
+    );
+
+    if (!hwndHotkeyWindow) {
+        LOG_ERROR("Failed to create hotkey window. Error code: " + std::to_string(GetLastError()));
+        return false;
+    }
+
+    // Associate the window with this instance
+    SetWindowLongPtrW(hwndHotkeyWindow, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
+    // Register the hotkey
+    if (!RegisterHotKey(hwndHotkeyWindow, 1, hotkeyModifiers, hotkeyVK)) {
+        LOG_ERROR("Failed to register hotkey. Error code: " + std::to_string(GetLastError()));
+        DestroyWindow(hwndHotkeyWindow);
+        hwndHotkeyWindow = nullptr;
+        return false;
+    }
+
+    LOG_INFO("Hotkey registered successfully.");
+
+    // Start the message loop thread
+    hotkeyRunning = true;
+    hotkeyThread = std::thread([this]() {
+        MSG msg;
+        while (hotkeyRunning.load()) {
+            // Wait for messages
+            if (GetMessageW(&msg, NULL, 0, 0)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            } else {
+                // WM_QUIT received
+                break;
+            }
+        }
+    });
+
+    return true;
+}
+
+// Cleanup hotkey registration and message loop
+void WindowsManager::CleanupHotkey() {
+    // Unregister the hotkey
+    if (hwndHotkeyWindow) {
+        UnregisterHotKey(hwndHotkeyWindow, 1);
+        DestroyWindow(hwndHotkeyWindow);
+        hwndHotkeyWindow = nullptr;
+    }
+
+    // Stop the message loop thread
+    if (hotkeyRunning.load()) {
+        hotkeyRunning = false;
+        PostMessageW(hwndHotkeyWindow, WM_QUIT, 0, 0);
+        if (hotkeyThread.joinable()) {
+            hotkeyThread.join();
+        }
+    }
+}
+
+// Window procedure to handle hotkey
+LRESULT CALLBACK WindowsManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    if (uMsg == WM_HOTKEY) {
+        // Retrieve the WindowsManager instance associated with this window
+        WindowsManager* pThis = reinterpret_cast<WindowsManager*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+
+        if (pThis && pThis->restartAudioEngineCallback) {
+            pThis->restartAudioEngineCallback();
+            LOG_INFO("Hotkey pressed: Restarting audio engine.");
+        }
+    }
+    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
+}
+
+WindowsManager::~WindowsManager() {
+
+    CleanupHotkey();
+
+    if (endpointVolume) {
+        endpointVolume->UnregisterControlChangeNotify(this);
+    }
+    Cleanup();
+    UninitializeCOM();
+
+}
+
 
 void WindowsManager::RegisterVolumeChangeCallback(std::function<void(float, bool)> callback) {
     std::lock_guard<std::mutex> lock(callbackMutex);
@@ -240,7 +349,7 @@ STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) {
 STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) { return S_OK; }
 
 void WindowsManager::PlayStartupSound() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500)); // \Waiting for default voicemeeter startup delay
     const std::wstring soundFilePath = L"m95.mp3";
     constexpr const wchar_t* aliasName = L"StartupSound";
     std::wstring openCommand = L"open \"" + soundFilePath + L"\" type mpegvideo alias " + aliasName;

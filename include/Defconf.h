@@ -3,6 +3,7 @@
 #pragma once
 
 #include <string>
+#include <windows.h>
 
 // -----------------------------
 // Mutex and Event Names
@@ -30,7 +31,8 @@ constexpr const char* DEFAULT_LOG_FILE = "VoiceMirror.log";      // Default log 
 constexpr int DEFAULT_CHANNEL_INDEX = 3;          // Default channel index for audio routing
 constexpr int DEFAULT_VOICEMEETER_TYPE = 2;       // Default Voicemeeter type (2 = Banana)
 constexpr int DEFAULT_POLLING_INTERVAL_MS = 100;  // Default polling interval for status checks
-constexpr int DEBOUNCE_DURATION_MS = 50;          // Debounce duration in milliseconds
+constexpr int DEBOUNCE_DURATION_MS = 250;          // Debounce duration in milliseconds
+
 
 // Retry settings for API initialization
 constexpr int MAX_RETRIES = 20;       // Maximum number of connection attempts
@@ -80,6 +82,7 @@ constexpr bool DEFAULT_SHUTDOWN_ENABLED = false;       // Default shutdown comma
 constexpr bool DEFAULT_STARTUP_SOUND_ENABLED = false;  // Default startup sound status
 constexpr bool DEFAULT_HELP_FLAG = false;              // Default help flag status
 constexpr bool DEFAULT_VERSION_FLAG = false;           // Default version flag status
+constexpr uint8_t VOICEMEETER_MANAGER_RETRIES = 10;  // Default short version flag status
 
 // -----------------------------
 // Command-Line Option Defaults
@@ -142,6 +145,20 @@ struct ConfigOption {
     ConfigSource source = ConfigSource::Default;
 };
 
+enum class ChangeSource {
+    None,
+    Windows,
+    Voicemeeter
+};
+
+// -----------------------------
+// Hotkey Settings
+// -----------------------------
+constexpr int DEFAULT_HOTKEY_MODIFIERS = MOD_CONTROL | MOD_ALT; // Ctrl + Alt
+constexpr int DEFAULT_HOTKEY_VK = 'R'; // R key
+
+
+
 // -----------------------------
 // Configuration Structure
 // -----------------------------
@@ -190,4 +207,10 @@ struct Config {
     ConfigOption<bool> listInputs = {false, ConfigSource::Default};
     ConfigOption<bool> listOutputs = {false, ConfigSource::Default};
     ConfigOption<bool> listChannels = {false, ConfigSource::Default};
+
+     // Hotkey Settings
+    ConfigOption<int> hotkeyModifiers = {DEFAULT_HOTKEY_MODIFIERS, ConfigSource::Default};
+    ConfigOption<int> hotkeyVK = {DEFAULT_HOTKEY_VK, ConfigSource::Default};
+    
+
 };

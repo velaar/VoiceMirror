@@ -29,7 +29,7 @@ inline float PercentToDbm(float percent, float minDbm = DEFAULT_MIN_DBM, float m
     return (percent / 100.0f) * (maxDbm - minDbm) + minDbm;
 }
 
-inline bool IsFloatEqual(float a, float b, float epsilon = 0.001f) {
+inline bool IsFloatEqual(float a, float b, float epsilon = 1.0f) { // Adjusted epsilon for full percent
     return std::fabs(a - b) < epsilon;
 }
 
