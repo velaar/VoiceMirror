@@ -1,14 +1,13 @@
-// VolumeMirror.h
-
 #pragma once
 
-#include <atomic>
+#include <chrono>
 #include <functional>
 #include <mutex>
 #include <thread>
 
 #include "VoicemeeterManager.h"
 #include "WindowsManager.h"
+
 
 class VolumeMirror {
 public:
@@ -29,7 +28,8 @@ private:
     void OnWindowsVolumeChange(float newVolume, bool isMuted);
     void MonitorVoicemeeter();
 
-    ChangeSource lastChangeSource;
+    // Suppression duration in milliseconds
+    static const int SUPPRESSION_DURATION_MS = 200; // Adjust as needed
 
     int channelIndex;
     ChannelType channelType;
@@ -44,18 +44,26 @@ private:
     float lastVmVolume;
     bool lastVmMute;
 
-    std::atomic<bool> ignoreWindowsChange;
-    std::atomic<bool> ignoreVoicemeeterChange;
+    bool ignoreWindowsChange;
+    bool ignoreVoicemeeterChange;
     bool running;
     bool playSoundOnSync;
     bool pollingEnabled;
     int pollingInterval;
     int debounceDuration;
 
-    std::mutex vmMutex;
-    std::mutex controlMutex;
+    std::mutex vmMutex;       // Protects Voicemeeter-related variables
+    std::mutex controlMutex;  // Protects control variables
     std::thread monitorThread;
     int refCount;
-    std::chrono::steady_clock::time_point lastWindowsChangeTime;
+
+    // Change source tracking
+    ChangeSource lastChangeSource;
+
+    // Suppression windows
+    std::chrono::steady_clock::time_point suppressVoicemeeterUntil;
+    std::chrono::steady_clock::time_point suppressWindowsUntil;
+
+    // Windows volume change callback
     std::function<void(float, bool)> windowsVolumeCallback;
 };

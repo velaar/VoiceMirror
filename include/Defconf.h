@@ -32,7 +32,7 @@ constexpr int DEFAULT_CHANNEL_INDEX = 3;          // Default channel index for a
 constexpr int DEFAULT_VOICEMEETER_TYPE = 2;       // Default Voicemeeter type (2 = Banana)
 constexpr int DEFAULT_POLLING_INTERVAL_MS = 100;  // Default polling interval for status checks
 constexpr int DEBOUNCE_DURATION_MS = 250;          // Debounce duration in milliseconds
-
+constexpr int SUPPRESSION_DURATION_MS = DEBOUNCE_DURATION_MS; 
 
 // Retry settings for API initialization
 constexpr int MAX_RETRIES = 20;       // Maximum number of connection attempts
@@ -208,9 +208,7 @@ struct Config {
     ConfigOption<bool> listOutputs = {false, ConfigSource::Default};
     ConfigOption<bool> listChannels = {false, ConfigSource::Default};
 
-     // Hotkey Settings
+    // Hotkey Settings
     ConfigOption<int> hotkeyModifiers = {DEFAULT_HOTKEY_MODIFIERS, ConfigSource::Default};
     ConfigOption<int> hotkeyVK = {DEFAULT_HOTKEY_VK, ConfigSource::Default};
-    
-
 };

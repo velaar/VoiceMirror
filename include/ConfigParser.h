@@ -8,6 +8,7 @@
 #include "cxxopts.hpp"
 #include "Defconf.h"
 
+
 class ConfigParser {
 public:
     ConfigParser(int argc, char** argv);
@@ -28,5 +29,4 @@ private:
     int argc_;
     char** argv_;
 };
-
 #endif // CONFIGPARSER_H
