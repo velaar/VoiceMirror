@@ -1,13 +1,10 @@
 // ConfigParser.h
-
-#ifndef CONFIGPARSER_H
-#define CONFIGPARSER_H
+#pragma once 
 
 #include <string>
 #include "Logger.h"
 #include "cxxopts.hpp"
 #include "Defconf.h"
-
 
 class ConfigParser {
 public:
@@ -18,7 +15,6 @@ public:
 private:
     static std::string Trim(const std::string& str);
     void ParseConfigFile(const std::string& configPath, Config& config);
-    void ValidateOptions(const cxxopts::ParseResult& result);
     cxxopts::Options CreateOptions();
     void ApplyCommandLineOptions(const cxxopts::ParseResult& result, Config& config);
     bool HandleSpecialCommands(const Config& config);
@@ -29,4 +25,3 @@ private:
     int argc_;
     char** argv_;
 };
-#endif // CONFIGPARSER_H

@@ -14,16 +14,13 @@
 #include <queue>
 #include <condition_variable>
 #include <atomic>
+#include <string_view>
 
-/**
- * @brief Enumeration for log levels.
- */
-enum class LogLevel {
-    DEBUG,    ///< Debug level for detailed internal information.
-    INFO,     ///< Informational messages that highlight the progress.
-    WARNING,  ///< Potentially harmful situations.
-    ERR       ///< Error events that might still allow the application to continue.
-};
+// Include RAIIHandle for managing HANDLEs
+#include "RAIIHandle.h"
+
+// Include Defconf.h for color definitions
+#include "Defconf.h"
 
 /**
  * @brief Logger class to handle logging with different levels.
@@ -93,18 +90,29 @@ private:
      * @param level The log level.
      * @return String representation of the log level.
      */
-    std::string LogLevelToString(LogLevel level);
+    constexpr const char* LogLevelToString(LogLevel level) const;
+
+    /**
+     * @brief Get the color attribute based on the log level.
+     * @param level The log level.
+     * @return WORD representing the console text color.
+     */
+    WORD GetColorForLogLevel(LogLevel level) const;
 
     LogLevel logLevel;             ///< Current log level.
     std::ofstream logFile;         ///< Output file stream for logging to a file.
     bool fileLoggingEnabled;       ///< Flag indicating if file logging is enabled.
     std::mutex logMutex;           ///< Mutex to protect access to the log queue.
-    std::queue<std::pair<LogLevel, std::string>> logQueue; ///< Queue holding pending log messages.
+    std::queue<std::pair<LogLevel, std::string>> logQueue; // Fixed-size could be used here for limited log size.    
     std::condition_variable cv;    ///< Condition variable to notify the logging thread.
     std::thread loggingThread;     ///< Dedicated thread for processing log messages.
     std::atomic<bool> exitFlag;    ///< Flag to signal the logging thread to exit.
+
+    // RAIIHandle for managing the console handle
+    RAIIHandle consoleHandle;
 };
 
+// Logging Macros
 #ifdef _DEBUG
     #define LOG_DEBUG(message) Logger::Instance().Log(LogLevel::DEBUG, message)
 #else
@@ -114,4 +122,5 @@ private:
 #define LOG_INFO(message) Logger::Instance().Log(LogLevel::INFO, message)
 #define LOG_WARNING(message) Logger::Instance().Log(LogLevel::WARNING, message)
 #define LOG_ERROR(message) Logger::Instance().Log(LogLevel::ERR, message)
+
 #endif  // LOGGER_H

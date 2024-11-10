@@ -2,6 +2,10 @@
 
 #include "Logger.h"
 #include <sstream>
+#include <windows.h>
+
+// Include Defconf.h for color definitions
+#include "Defconf.h"
 
 Logger& Logger::Instance() {
     static Logger instance;
@@ -11,8 +15,11 @@ Logger& Logger::Instance() {
 Logger::Logger()
     : logLevel(LogLevel::INFO),
       fileLoggingEnabled(false),
-      exitFlag(false) {
-    // Constructor intentionally left blank
+      exitFlag(false),
+      consoleHandle(GetStdHandle(STD_OUTPUT_HANDLE)) { // Initialize RAIIHandle with console handle
+    if (consoleHandle.get() == INVALID_HANDLE_VALUE) {
+        std::cerr << "Logger: Failed to obtain console handle." << std::endl;
+    }
 }
 
 Logger::~Logger() {
@@ -70,18 +77,28 @@ void Logger::Log(LogLevel level, std::string_view message) {
     cv.notify_one();
 }
 
-std::string Logger::LogLevelToString(LogLevel level) {
+constexpr const char* Logger::LogLevelToString(LogLevel level) const {
+    switch (level) {
+        case LogLevel::DEBUG: return "DEBUG";
+        case LogLevel::INFO: return "INFO";
+        case LogLevel::WARNING: return "WARNING";
+        case LogLevel::ERR: return "ERROR";
+        default: return "UNKNOWN";
+    }
+}
+
+WORD Logger::GetColorForLogLevel(LogLevel level) const {
     switch (level) {
         case LogLevel::DEBUG:
-            return "<DEBUG> ";
+            return DEBUG_COLOR;
         case LogLevel::INFO:
-            return "<INFO> ";
+            return INFO_COLOR;
         case LogLevel::WARNING:
-            return "<WARNING> ";
+            return WARNING_COLOR;
         case LogLevel::ERR:
-            return "<ERROR> ";
+            return ERROR_COLOR;
         default:
-            return "<UNKNOWN> ";
+            return FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE; // Default to white
     }
 }
 
@@ -115,14 +132,33 @@ void Logger::ProcessLogQueue() {
             // Prepare the log message
             std::ostringstream logStream;
             logStream << "[" << time_buffer << "." << std::setfill('0') << std::setw(3)
-                      << milliseconds.count() << "] " << LogLevelToString(level) << message << std::endl;
+                      << milliseconds.count() << "] " << LogLevelToString(level) << ": " << message << std::endl;
 
-            // Output the log message
+            std::string finalLog = logStream.str();
+
+            // Output the log message with colorization
             if (fileLoggingEnabled && logFile.is_open()) {
-                logFile << logStream.str();
+                logFile << finalLog;
                 logFile.flush(); // Ensure the message is written immediately
             } else {
-                std::cout << logStream.str();
+                // Set console text color based on log level
+                WORD originalAttributes;
+                // Retrieve current console attributes
+                CONSOLE_SCREEN_BUFFER_INFO csbi;
+                if (GetConsoleScreenBufferInfo(consoleHandle.get(), &csbi)) {
+                    originalAttributes = csbi.wAttributes;
+                } else {
+                    originalAttributes = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE; // Default to white
+                }
+
+                // Set color
+                SetConsoleTextAttribute(consoleHandle.get(), GetColorForLogLevel(level));
+
+                // Write to console
+                std::cout << finalLog;
+
+                // Reset to original color
+                SetConsoleTextAttribute(consoleHandle.get(), originalAttributes);
             }
 
             lock.lock(); // Re-lock to check for more messages

@@ -1,47 +1,62 @@
 #ifndef WINDOWSMANAGER_H
 #define WINDOWSMANAGER_H
 
-#include <functional>
-#include <string>
-#include <vector>
-#include <mutex>
-#include <atomic>
+#pragma once
 
 #include <audiopolicy.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
+#include <mmsystem.h>
 #include <windows.h>
 #include <wrl/client.h>
 
-#include "RAIIHandle.h"
+#include <atomic>
+#include <functional>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "Defconf.h"
 
 class WindowsManager : public IAudioEndpointVolumeCallback, public IMMNotificationClient {
-public:
-    WindowsManager(const std::string& deviceUUID);
+   public:
+    // Updated constructor to accept Config
+    explicit WindowsManager(const Config& config);
     ~WindowsManager();
 
+    // Volume control methods
     bool SetVolume(float volumePercent);
     bool SetMute(bool mute);
     float GetVolume() const;
     bool GetMute() const;
 
+    // Callback registration
     void RegisterVolumeChangeCallback(std::function<void(float, bool)> callback);
     void UnregisterVolumeChangeCallback(std::function<void(float, bool)> callback);
+
+    // Device monitoring
     void CheckDevice(LPCWSTR deviceId, bool isAdded);
 
+    // Hotkey and restart callbacks
     void SetRestartAudioEngineCallback(std::function<void()> callback);
+    void SetHotkeySettings(uint16_t modifiers, uint8_t vk);
+
+    // Utility methods
     void ListMonitorableDevices();
 
-    // Public methods for playing sounds
-    void PlayStartupSound();
+    // Methods for playing sounds
+    void PlayStartupSound(const std::wstring& soundFilePath, uint16_t delayMs);
     void PlaySyncSound();
 
     // IUnknown methods
     STDMETHODIMP QueryInterface(REFIID riid, void** ppvInterface) override;
-    STDMETHODIMP_(ULONG) AddRef() override;
-    STDMETHODIMP_(ULONG) Release() override;
+    STDMETHODIMP_(ULONG)
+    AddRef() override;
+    STDMETHODIMP_(ULONG)
+    Release() override;
 
-    // IAudioEndpointVolumeCallback methods
+    // IAudioEndpointVolumeCallback method
     STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
 
     // IMMNotificationClient methods
@@ -55,8 +70,8 @@ public:
     std::function<void()> onDevicePluggedIn;
     std::function<void()> onDeviceUnplugged;
 
-
-private:
+   private:
+    // COM Initialization
     bool InitializeCOM();
     void UninitializeCOM();
     bool InitializeCOMInterfaces();
@@ -65,40 +80,45 @@ private:
 
     void HandleDevicePluggedIn();
     void HandleDeviceUnplugged();
-    
+
+    std::wstring syncSoundFilePath_;
+
     // Hotkey related
-    int hotkeyModifiers;
-    int hotkeyVK;
-    std::function<void()> restartAudioEngineCallback;
-    RAIIHandle hotkeyHandle{nullptr};
     bool InitializeHotkey();
     void CleanupHotkey();
-    std::thread hotkeyThread;
-    std::atomic<bool> hotkeyRunning{false};
+    HWND hwndHotkeyWindow_;
+
     // Window procedure
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
-    HWND hwndHotkeyWindow = nullptr;
 
+    // Utility
     static std::string WideStringToUTF8(const std::wstring& wideStr);
 
-    std::atomic<ULONG> refCount;
-    std::vector<std::function<void(float, bool)>> callbacks;
+    // Member variables
+    std::atomic<ULONG> refCount_{1};
+    std::vector<std::function<void(float, bool)>> callbacks_;
+    mutable std::mutex callbackMutex_;  // Protects callbacks vector
 
-    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> deviceEnumerator;
-    Microsoft::WRL::ComPtr<IMMDevice> speakers;
-    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpointVolume;
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> deviceEnumerator_;
+    Microsoft::WRL::ComPtr<IMMDevice> speakers_;
+    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpointVolume_;
 
-    // RAII wrapper for HANDLE
-    RAIIHandle comInitMutex;
-    bool comInitialized;
-    std::string targetDeviceUUID;
+    // Synchronization
+    mutable std::mutex comInitializedMutex_;  // Protects comInitialized flag
+    mutable std::mutex soundMutex_;           // Protects sound-related operations
 
+    // COM Initialization
+    bool comInitialized_;
+    std::string targetDeviceUUID_;
 
-    mutable std::mutex comInitializedMutex; // Protects comInitialized flag
-    mutable std::mutex soundMutex;          // Protects sound-related operations
-    mutable std::mutex callbackMutex;       // Protects callbacks vector
+    // Hotkey settings
+    uint16_t hotkeyModifiers_;
+    uint8_t hotkeyVK_;
+    std::function<void()> restartAudioEngineCallback_;
 
-
+    // Configuration
+    const Config& config_;
+    static std::wstring UTF8ToWideString(const std::string& utf8Str);
 };
 
-#endif // WINDOWSMANAGER_H
+#endif  // WINDOWSMANAGER_H

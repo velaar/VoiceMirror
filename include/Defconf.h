@@ -1,66 +1,68 @@
 // Defconf.h
-
 #pragma once
 
-#include <string>
 #include <windows.h>
+#include <cstdint>
 
 // -----------------------------
 // Mutex and Event Names
 // -----------------------------
 
-constexpr char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";      // Mutex to prevent multiple instances
-constexpr char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent";  // Event to signal application shutdown
-constexpr char COM_INIT_MUTEX_NAME[] = "Global\\VoiceMirrorCOMInitMutex"; // Mutex to shield COM initialization
+constexpr const char MUTEX_NAME[] = "Global\\VoiceMirrorMutex";
+constexpr const char EVENT_NAME[] = "Global\\VoiceMirrorQuitEvent";
+constexpr const char COM_INIT_MUTEX_NAME[] = "Global\\VoiceMirrorCOMInitMutex";
+
 // -----------------------------
 // Default Paths
 // -----------------------------
 
-// Default paths to Voicemeeter DLLs based on system architecture
 constexpr const char* DEFAULT_DLL_PATH_64 = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote64.dll";
 constexpr const char* DEFAULT_DLL_PATH_32 = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote.dll";
 
-// Configuration file and logging paths
-constexpr const char* DEFAULT_CONFIG_FILE = "VoiceMirror.conf";  // Default configuration file
-constexpr const char* DEFAULT_LOG_FILE = "VoiceMirror.log";      // Default log file
+constexpr const char* DEFAULT_CONFIG_FILE = "VoiceMirror.conf";
+constexpr const char* DEFAULT_LOG_FILE = "VoiceMirror.log";
+constexpr const char* DEFAULT_STARTUP_SOUND_FILE = "m95.mp3";
+constexpr const wchar_t* DEFAULT_SYNC_SOUND_FILE = L"C:\\Windows\\Media\\Windows Unlock.wav";
 
 // -----------------------------
 // Voicemeeter Settings and Configuration Defaults
 // -----------------------------
+constexpr WORD DEBUG_COLOR = FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+constexpr WORD INFO_COLOR = FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+constexpr WORD WARNING_COLOR = FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY;
+constexpr WORD ERROR_COLOR = FOREGROUND_RED | FOREGROUND_INTENSITY;
 
-constexpr int DEFAULT_CHANNEL_INDEX = 3;          // Default channel index for audio routing
-constexpr int DEFAULT_VOICEMEETER_TYPE = 2;       // Default Voicemeeter type (2 = Banana)
-constexpr int DEFAULT_POLLING_INTERVAL_MS = 100;  // Default polling interval for status checks
-constexpr int DEBOUNCE_DURATION_MS = 250;          // Debounce duration in milliseconds
-constexpr int SUPPRESSION_DURATION_MS = DEBOUNCE_DURATION_MS; 
-
-// Retry settings for API initialization
-constexpr int MAX_RETRIES = 20;       // Maximum number of connection attempts
-constexpr int RETRY_DELAY_MS = 1000;  // Delay between connection attempts (milliseconds)
+constexpr uint8_t DEFAULT_CHANNEL_INDEX = 3;
+constexpr uint8_t DEFAULT_VOICEMEETER_TYPE = 2;
+constexpr uint16_t DEFAULT_POLLING_INTERVAL_MS = 100;
+constexpr uint16_t DEFAULT_STARTUP_SOUND_DELAY_MS = 1250;
+constexpr uint16_t DEBOUNCE_DURATION_MS = 250;
+constexpr uint16_t SUPPRESSION_DURATION_MS = DEBOUNCE_DURATION_MS;
+constexpr uint8_t MAX_RETRIES = 20;
+constexpr uint16_t RETRY_DELAY_MS = 1000;
 
 // -----------------------------
 // Chime Settings
 // -----------------------------
 
-constexpr const wchar_t* SYNC_SOUND_FILE_PATH = L"C:\\Windows\\Media\\Windows Unlock.wav";  // Path to synchronization sound
-constexpr const wchar_t* SYNC_FALLBACK_SOUND_ALIAS = L"SystemAsterisk";                     // Fallback sound alias
+constexpr const wchar_t* SYNC_SOUND_FILE_PATH = L"C:\\Windows\\Media\\Windows Unlock.wav";
+constexpr const wchar_t* SYNC_FALLBACK_SOUND_ALIAS = L"SystemAsterisk";
 
 // -----------------------------
 // Audio Level Boundaries and Defaults
 // -----------------------------
 
-constexpr float DEFAULT_MIN_DBM = -60.0f;  // Minimum decibel level
-constexpr float DEFAULT_MAX_DBM = 12.0f;   // Maximum decibel level
+constexpr int8_t DEFAULT_MIN_DBM = -60;
+constexpr int8_t DEFAULT_MAX_DBM = 12;
 
-// Volume settings
-constexpr int DEFAULT_STARTUP_VOLUME_PERCENT = -1;  // Default volume at startup (-1 = unchanged)
+constexpr int8_t DEFAULT_STARTUP_VOLUME_PERCENT = -1;
 
 // -----------------------------
 // Toggle Parameters
 // -----------------------------
 
-constexpr const char* DEFAULT_TOGGLE_PARAM = "input:0:1";  // Default toggle parameter format
-constexpr const char* DEFAULT_TOGGLE_COMMAND = "";         // Default toggle command (empty means not set)
+constexpr const char* DEFAULT_TOGGLE_PARAM = "input:0:1";
+constexpr const char* DEFAULT_TOGGLE_COMMAND = "";
 
 // -----------------------------
 // Application Behavior Defaults
@@ -72,41 +74,40 @@ constexpr bool DEFAULT_DEBUG_MODE =
 #else
     false
 #endif
-;                          // Default debug mode status
+;
 
-constexpr bool DEFAULT_HIDDEN_CONSOLE = false;                      // Default console visibility
-constexpr bool DEFAULT_LOGGING_ENABLED = false;                     // Default logging status
-constexpr bool DEFAULT_CHIME_ENABLED = false;          // Default chime sound status
-constexpr bool DEFAULT_POLLING_ENABLED = false;        // Default polling mode status
-constexpr bool DEFAULT_SHUTDOWN_ENABLED = false;       // Default shutdown command status
-constexpr bool DEFAULT_STARTUP_SOUND_ENABLED = false;  // Default startup sound status
-constexpr bool DEFAULT_HELP_FLAG = false;              // Default help flag status
-constexpr bool DEFAULT_VERSION_FLAG = false;           // Default version flag status
-constexpr uint8_t VOICEMEETER_MANAGER_RETRIES = 10;  // Default short version flag status
+constexpr bool DEFAULT_HIDDEN_CONSOLE = false;
+constexpr bool DEFAULT_LOGGING_ENABLED = false;
+constexpr bool DEFAULT_CHIME_ENABLED = false;
+constexpr bool DEFAULT_POLLING_ENABLED = false;
+constexpr bool DEFAULT_SHUTDOWN_ENABLED = false;
+constexpr bool DEFAULT_STARTUP_SOUND_ENABLED = false;
+constexpr bool DEFAULT_HELP_FLAG = false;
+constexpr bool DEFAULT_VERSION_FLAG = false;
+
+constexpr uint8_t VOICEMEETER_MANAGER_RETRIES = 10;
 
 // -----------------------------
 // Command-Line Option Defaults
 // -----------------------------
 
-constexpr const char* DEFAULT_TYPE = "input";            // Default channel type ("input" or "output")
-constexpr const char* DEFAULT_MONITOR_DEVICE_UUID = "";  // Default monitor device UUID (empty means not set)
+constexpr const char* DEFAULT_TYPE = "input";
+constexpr const char* DEFAULT_MONITOR_DEVICE_UUID = "";
 
 // -----------------------------
 // Version Information
 // -----------------------------
 
-constexpr int VERSION_MAJOR = 0;                      // Major version number
-constexpr int VERSION_MINOR = 2;                      // Minor version number
-constexpr int VERSION_PATCH = 0;                      // Patch version number
-constexpr const char* VERSION_PRE_RELEASE = "alpha";  // Pre-release tag (e.g., "alpha", "beta", "rc")
-// If there's no pre-release tag, set to an empty string:
-// constexpr const char* VERSION_PRE_RELEASE = "";
+constexpr uint8_t VERSION_MAJOR = 0;
+constexpr uint8_t VERSION_MINOR = 2;
+constexpr uint8_t VERSION_PATCH = 0;
+constexpr const char* VERSION_PRE_RELEASE = "alpha";
 
 // -----------------------------
 // Voicemeeter Type Enumeration
 // -----------------------------
 
-enum VoicemeeterType {
+enum VoicemeeterType : uint8_t {
     VOICEMEETER_BASIC = 1,
     VOICEMEETER_BANANA,
     VOICEMEETER_POTATO,
@@ -119,24 +120,32 @@ enum VoicemeeterType {
 // Channel Type Enumeration
 // -----------------------------
 
-enum class ChannelType {
+enum class ChannelType : uint8_t {
     Input,
     Output
 };
 
-/**
- * @brief Structure to hold toggle configuration parameters.
- */
+// -----------------------------
+// Toggle Configuration Structure
+// -----------------------------
+
 struct ToggleConfig {
-    std::string type; ///< Type of channel ('input' or 'output').
-    int index1;       ///< First channel index.
-    int index2;       ///< Second channel index.
+    const char* type;  // Channel type
+    uint8_t index1;    // First channel index
+    uint8_t index2;    // Second channel index
 };
 
-enum class ConfigSource {
+enum class ConfigSource : uint8_t {
     Default,
     ConfigFile,
     CommandLine
+};
+
+enum class LogLevel {
+    DEBUG,    ///< Debug level for detailed internal information.
+    INFO,     ///< Informational messages that highlight the progress.
+    WARNING,  ///< Potentially harmful situations.
+    ERR       ///< Error events that might still allow the application to continue.
 };
 
 template <typename T>
@@ -145,7 +154,7 @@ struct ConfigOption {
     ConfigSource source = ConfigSource::Default;
 };
 
-enum class ChangeSource {
+enum class ChangeSource : uint8_t {
     None,
     Windows,
     Voicemeeter
@@ -154,18 +163,18 @@ enum class ChangeSource {
 // -----------------------------
 // Hotkey Settings
 // -----------------------------
-constexpr int DEFAULT_HOTKEY_MODIFIERS = MOD_CONTROL | MOD_ALT; // Ctrl + Alt
-constexpr int DEFAULT_HOTKEY_VK = 'R'; // R key
 
-
+constexpr uint16_t DEFAULT_HOTKEY_MODIFIERS = MOD_CONTROL | MOD_ALT;
+constexpr uint8_t DEFAULT_HOTKEY_VK = 'R';
 
 // -----------------------------
 // Configuration Structure
 // -----------------------------
+
 struct Config {
     // File Paths
-    ConfigOption<std::string> configFilePath = {DEFAULT_CONFIG_FILE, ConfigSource::Default};
-    ConfigOption<std::string> logFilePath = {DEFAULT_LOG_FILE, ConfigSource::Default};
+    ConfigOption<const char*> configFilePath = {DEFAULT_CONFIG_FILE, ConfigSource::Default};
+    ConfigOption<const char*> logFilePath = {DEFAULT_LOG_FILE, ConfigSource::Default};
 
     // Debugging and Logging
     ConfigOption<bool> debug = {DEFAULT_DEBUG_MODE, ConfigSource::Default};
@@ -181,26 +190,26 @@ struct Config {
     ConfigOption<bool> startupSound = {DEFAULT_STARTUP_SOUND_ENABLED, ConfigSource::Default};
 
     // Volume Settings
-    ConfigOption<int> startupVolumePercent = {DEFAULT_STARTUP_VOLUME_PERCENT, ConfigSource::Default};
+    ConfigOption<int8_t> startupVolumePercent = {DEFAULT_STARTUP_VOLUME_PERCENT, ConfigSource::Default};
 
     // Voicemeeter Settings
-    ConfigOption<int> voicemeeterType = {DEFAULT_VOICEMEETER_TYPE, ConfigSource::Default};
-    ConfigOption<int> index = {DEFAULT_CHANNEL_INDEX, ConfigSource::Default};
+    ConfigOption<uint8_t> voicemeeterType = {DEFAULT_VOICEMEETER_TYPE, ConfigSource::Default};
+    ConfigOption<uint8_t> index = {DEFAULT_CHANNEL_INDEX, ConfigSource::Default};
 
     // Audio Levels
-    ConfigOption<float> maxDbm = {DEFAULT_MAX_DBM, ConfigSource::Default};
-    ConfigOption<float> minDbm = {DEFAULT_MIN_DBM, ConfigSource::Default};
+    ConfigOption<int8_t> maxDbm = {DEFAULT_MAX_DBM, ConfigSource::Default};
+    ConfigOption<int8_t> minDbm = {DEFAULT_MIN_DBM, ConfigSource::Default};
 
     // Device and Toggle Settings
-    ConfigOption<std::string> monitorDeviceUUID = {DEFAULT_MONITOR_DEVICE_UUID, ConfigSource::Default};
-    ConfigOption<std::string> toggleParam = {DEFAULT_TOGGLE_PARAM, ConfigSource::Default};
-    ConfigOption<std::string> toggleCommand = {DEFAULT_TOGGLE_COMMAND, ConfigSource::Default};
+    ConfigOption<const char*> monitorDeviceUUID = {DEFAULT_MONITOR_DEVICE_UUID, ConfigSource::Default};
+    ConfigOption<const char*> toggleParam = {DEFAULT_TOGGLE_PARAM, ConfigSource::Default};
+    ConfigOption<const char*> toggleCommand = {DEFAULT_TOGGLE_COMMAND, ConfigSource::Default};
 
     // Polling Settings
-    ConfigOption<int> pollingInterval = {DEFAULT_POLLING_INTERVAL_MS, ConfigSource::Default};
+    ConfigOption<uint16_t> pollingInterval = {DEFAULT_POLLING_INTERVAL_MS, ConfigSource::Default};
 
     // Channel Type
-    ConfigOption<std::string> type = {DEFAULT_TYPE, ConfigSource::Default};
+    ConfigOption<const char*> type = {DEFAULT_TYPE, ConfigSource::Default};
 
     // Listing Flags
     ConfigOption<bool> listMonitor = {false, ConfigSource::Default};
@@ -209,6 +218,11 @@ struct Config {
     ConfigOption<bool> listChannels = {false, ConfigSource::Default};
 
     // Hotkey Settings
-    ConfigOption<int> hotkeyModifiers = {DEFAULT_HOTKEY_MODIFIERS, ConfigSource::Default};
-    ConfigOption<int> hotkeyVK = {DEFAULT_HOTKEY_VK, ConfigSource::Default};
+    ConfigOption<uint16_t> hotkeyModifiers = {DEFAULT_HOTKEY_MODIFIERS, ConfigSource::Default};
+    ConfigOption<uint8_t> hotkeyVK = {DEFAULT_HOTKEY_VK, ConfigSource::Default};
+
+    // Sound Settings
+    ConfigOption<const wchar_t*> syncSoundFilePath = {DEFAULT_SYNC_SOUND_FILE, ConfigSource::Default};
+    ConfigOption<const char*> startupSoundFilePath = {DEFAULT_STARTUP_SOUND_FILE, ConfigSource::Default};
+    ConfigOption<uint16_t> startupSoundDelay = {DEFAULT_STARTUP_SOUND_DELAY_MS, ConfigSource::Default};
 };
