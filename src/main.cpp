@@ -97,7 +97,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Configuration error: " << e.what() << std::endl;
         return EXIT_FAILURE;
     }
-    
+
     const Config& config = appConfig;  // Lock the config as const
 
     if (appConfig.shutdown.value) {
@@ -142,8 +142,18 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    std::unique_ptr<WindowsManager> windowsManager;
+    try {
+        windowsManager = std::make_unique<WindowsManager>(appConfig);
+    } catch (const std::exception& e) {
+        LOG_ERROR("[main] Failed to create WindowsManager: " + std::string(e.what()));
+        Logger::Instance().Shutdown();
+        return EXIT_FAILURE;
+    }
+
+
     VoicemeeterManager vmrManager;
-    vmrManager.SetDebugMode(appConfig.debug.value);
+
 
     if (!vmrManager.Initialize(appConfig.voicemeeterType.value)) {
         LOG_ERROR("[main] Failed to initialize and log in to Voicemeeter.");
@@ -172,17 +182,8 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
 
-    std::unique_ptr<WindowsManager> windowsManager;
-    try {
-        windowsManager = std::make_unique<WindowsManager>(appConfig);
-    } catch (const std::exception& e) {
-        LOG_ERROR("[main] Failed to create WindowsManager: " + std::string(e.what()));
-        vmrManager.Shutdown();
-        Logger::Instance().Shutdown();
-        return EXIT_FAILURE;
-    }
-
-    if (appConfig.toggleParam.value && appConfig.toggleParam.value[0] != '\0') {
+  
+    if (!appConfig.toggleParam.value.empty()) {
         ToggleConfig toggleConfig;
         try {
             toggleConfig = ConfigParser::ParseToggleParameter(appConfig.toggleParam.value);
@@ -199,155 +200,157 @@ int main(int argc, char* argv[]) {
                                           : ChannelType::Output;
             vmrManager.SetMute(toggleConfig.index1, channelType, false);
             vmrManager.SetMute(toggleConfig.index2, channelType, true);
-
-            LOG_INFO("[main] Applied toggle settings on startup: " + std::string(toggleConfig.type) +
-                     " channel " + std::to_string(toggleConfig.index1) + " unmuted, " +
-                     "channel " + std::to_string(toggleConfig.index2) + " muted.");
+            LOG_INFO("[main] Applied toggle settings on startup: type=" +
+                     std::to_string(static_cast<int>(toggleConfig.index1)) +
+                     " unmuted, channel " +
+                     std::to_string(static_cast<int>(toggleConfig.index2)) +
+                     " muted.");
         };
-    }
 
-    if (appConfig.monitorDeviceUUID.value && appConfig.monitorDeviceUUID.value[0] != '\0') {
-        std::wstring monitorUUIDWStr = ConvertToWString(appConfig.monitorDeviceUUID.value);
-        windowsManager->CheckDevice(monitorUUIDWStr.c_str(), true);
-    }
+        if (!appConfig.monitorDeviceUUID.value.empty()) {
+            std::wstring monitorUUIDWStr = ConvertToWString(appConfig.monitorDeviceUUID.value.c_str());
+            windowsManager->CheckDevice(monitorUUIDWStr.c_str(), true);
+        }
 
-    if (appConfig.listMonitor.value) {
-        windowsManager->ListMonitorableDevices();
-        vmrManager.Shutdown();
-        Logger::Instance().Shutdown();
-        return EXIT_SUCCESS;
-    }
+        if (appConfig.listMonitor.value) {
+            windowsManager->ListMonitorableDevices();
+            vmrManager.Shutdown();
+            Logger::Instance().Shutdown();
+            return EXIT_SUCCESS;
+        }
 
-    if (appConfig.toggleParam.value && appConfig.toggleParam.value[0] != '\0') {
-        ToggleConfig toggleConfig;
+        if (!appConfig.toggleParam.value.empty()) {
+            ToggleConfig toggleConfig;
+            try {
+                toggleConfig = ConfigParser::ParseToggleParameter(appConfig.toggleParam.value);
+            } catch (const std::exception& ex) {
+                LOG_ERROR("[main] Exception while parsing toggle parameter: " + std::string(ex.what()));
+                vmrManager.Shutdown();
+                Logger::Instance().Shutdown();
+                return EXIT_FAILURE;
+            }
+
+            windowsManager->onDevicePluggedIn = [&vmrManager, &toggleConfig]() {
+                std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
+                vmrManager.RestartAudioEngine();
+                ChannelType channelType = (std::string(toggleConfig.type) == "input")
+                                              ? ChannelType::Input
+                                              : ChannelType::Output;
+                vmrManager.SetMute(toggleConfig.index1, channelType, false);
+                vmrManager.SetMute(toggleConfig.index2, channelType, true);
+            };
+
+            windowsManager->onDeviceUnplugged = [&vmrManager, &toggleConfig]() {
+                std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
+                ChannelType channelType = (std::string(toggleConfig.type) == "input")
+                                              ? ChannelType::Input
+                                              : ChannelType::Output;
+                vmrManager.SetMute(toggleConfig.index1, channelType, true);
+                vmrManager.SetMute(toggleConfig.index2, channelType, false);
+            };
+        }
+
+        uint8_t channelIndex = appConfig.index.value;
+        ChannelType channelType = (std::string(appConfig.type.value) == "input")
+                                      ? ChannelType::Input
+                                      : ChannelType::Output;
+        int8_t minDbm = appConfig.minDbm.value;
+        int8_t maxDbm = appConfig.maxDbm.value;
+
+        std::string_view monitorDeviceUUID = appConfig.monitorDeviceUUID.value;
+        bool isMonitoring = (!monitorDeviceUUID.empty());
+
+        std::unique_ptr<VolumeMirror> mirror = nullptr;
         try {
-            toggleConfig = ConfigParser::ParseToggleParameter(appConfig.toggleParam.value);
+            mirror = std::make_unique<VolumeMirror>(
+                channelIndex,
+                channelType,
+                minDbm,
+                maxDbm,
+                vmrManager,
+                *windowsManager,
+                appConfig.chime.value);
+
+            mirror->SetPollingMode(appConfig.pollingEnabled.value, appConfig.pollingInterval.value);
+            mirror->Start();
+            LOG_INFO("[main] Volume mirroring started.");
+
+            LOG_INFO("[main] VoiceMirror is running. Press Ctrl+C to exit.");
+
+            std::thread quitThread;
+
+            if (appConfig.startupVolumePercent.value != DEFAULT_STARTUP_VOLUME_PERCENT) {
+                LOG_DEBUG("[main] Setting startup volume to " + std::to_string(appConfig.startupVolumePercent.value) + "%");
+
+                try {
+                    if (windowsManager->SetVolume(static_cast<float>(appConfig.startupVolumePercent.value))) {
+                        LOG_DEBUG("[main] Startup volume set successfully.");
+                    } else {
+                        LOG_ERROR("[main] Failed to set startup volume.");
+                    }
+                } catch (const std::exception& ex) {
+                    LOG_ERROR("[main] Volume setting failed: " + std::string(ex.what()));
+                }
+            }
+
+            if (appConfig.startupSound.value) {
+                std::thread startupSoundThread([&]() {
+                    windowsManager->PlayStartupSound(ConvertToWString(appConfig.startupSoundFilePath.value), appConfig.startupDelay.value);
+                });
+                startupSoundThread.detach();
+            }
+
+            if (isMonitoring) {
+                quitThread = std::thread([&appState]() {
+                    while (appState.g_running.load()) {
+                        DWORD result = WaitForSingleObject(appState.g_hQuitEvent.get(), 500);
+                        if (result == WAIT_OBJECT_0 || !appState.g_running.load()) {
+                            LOG_DEBUG("[main] Quit event signaled or running set to false. Initiating shutdown sequence...");
+                            appState.g_running = false;
+                            {
+                                std::lock_guard<std::mutex> lock(appState.cv_mtx);
+                                appState.exitFlag = true;
+                            }
+                            appState.cv.notify_one();
+                            break;
+                        }
+                    }
+                });
+            }
+
+            {
+                std::unique_lock<std::mutex> lock(appState.cv_mtx);
+                appState.cv.wait(lock, [&appState] { return !appState.g_running.load(); });
+            }
+
+            if (mirror) {
+                mirror->Stop();
+            }
+
+            mirror.reset();
+            windowsManager.reset();
+            vmrManager.Shutdown();
+            LOG_INFO("[main] VoiceMirror has shut down gracefully.");
+
+            Logger::Instance().Shutdown();
+
+            if (quitThread.joinable()) {
+                quitThread.join();
+            }
+
         } catch (const std::exception& ex) {
-            LOG_ERROR("[main] Exception while parsing toggle parameter: " + std::string(ex.what()));
+            LOG_ERROR("[main] An error occurred: " + std::string(ex.what()));
+            if (mirror) {
+                mirror->Stop();
+            }
+            mirror.reset();
+            windowsManager.reset();
             vmrManager.Shutdown();
             Logger::Instance().Shutdown();
             return EXIT_FAILURE;
         }
 
-        windowsManager->onDevicePluggedIn = [&vmrManager, &toggleConfig]() {
-            std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
-            vmrManager.RestartAudioEngine();
-            ChannelType channelType = (std::string(toggleConfig.type) == "input")
-                                          ? ChannelType::Input
-                                          : ChannelType::Output;
-            vmrManager.SetMute(toggleConfig.index1, channelType, false);
-            vmrManager.SetMute(toggleConfig.index2, channelType, true);
-        };
-
-        windowsManager->onDeviceUnplugged = [&vmrManager, &toggleConfig]() {
-            std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
-            ChannelType channelType = (std::string(toggleConfig.type) == "input")
-                                          ? ChannelType::Input
-                                          : ChannelType::Output;
-            vmrManager.SetMute(toggleConfig.index1, channelType, true);
-            vmrManager.SetMute(toggleConfig.index2, channelType, false);
-        };
+        return EXIT_SUCCESS;
     }
-
-    uint8_t channelIndex = appConfig.index.value;
-    ChannelType channelType = (std::string(appConfig.type.value) == "input")
-                                  ? ChannelType::Input
-                                  : ChannelType::Output;
-    int8_t minDbm = appConfig.minDbm.value;
-    int8_t maxDbm = appConfig.maxDbm.value;
-
-    const char* monitorDeviceUUID = appConfig.monitorDeviceUUID.value;
-    bool isMonitoring = (monitorDeviceUUID && monitorDeviceUUID[0] != '\0');
-
-    std::unique_ptr<VolumeMirror> mirror = nullptr;
-    try {
-        mirror = std::make_unique<VolumeMirror>(
-            channelIndex,
-            channelType,
-            minDbm,
-            maxDbm,
-            vmrManager,
-            *windowsManager,
-            appConfig.chime.value);
-
-        mirror->SetPollingMode(appConfig.pollingEnabled.value, appConfig.pollingInterval.value);
-        mirror->Start();
-        LOG_INFO("[main] Volume mirroring started.");
-
-        LOG_INFO("[main] VoiceMirror is running. Press Ctrl+C to exit.");
-
-        std::thread quitThread;
-
-        if (appConfig.startupVolumePercent.value != DEFAULT_STARTUP_VOLUME_PERCENT) {
-            LOG_DEBUG("[main] Setting startup volume to " + std::to_string(appConfig.startupVolumePercent.value) + "%");
-
-            try {
-                if (windowsManager->SetVolume(static_cast<float>(appConfig.startupVolumePercent.value))) {
-                    LOG_DEBUG("[main] Startup volume set successfully.");
-                } else {
-                    LOG_ERROR("[main] Failed to set startup volume.");
-                }
-            } catch (const std::exception& ex) {
-                LOG_ERROR("[main] Volume setting failed: " + std::string(ex.what()));
-            }
-        }
-
-        if (appConfig.startupSound.value) {
-            std::thread startupSoundThread([&]() {
-                windowsManager->PlayStartupSound(appConfig.syncSoundFilePath.value, appConfig.startupSoundDelay.value);
-            });
-            startupSoundThread.detach();
-        }
-
-        if (isMonitoring) {
-            quitThread = std::thread([&appState]() {
-                while (appState.g_running.load()) {
-                    DWORD result = WaitForSingleObject(appState.g_hQuitEvent.get(), 500);
-                    if (result == WAIT_OBJECT_0 || !appState.g_running.load()) {
-                        LOG_DEBUG("[main] Quit event signaled or running set to false. Initiating shutdown sequence...");
-                        appState.g_running = false;
-                        {
-                            std::lock_guard<std::mutex> lock(appState.cv_mtx);
-                            appState.exitFlag = true;
-                        }
-                        appState.cv.notify_one();
-                        break;
-                    }
-                }
-            });
-        }
-
-        {
-            std::unique_lock<std::mutex> lock(appState.cv_mtx);
-            appState.cv.wait(lock, [&appState] { return !appState.g_running.load(); });
-        }
-
-        if (mirror) {
-            mirror->Stop();
-        }
-
-        mirror.reset();
-        windowsManager.reset();
-        vmrManager.Shutdown();
-        LOG_INFO("[main] VoiceMirror has shut down gracefully.");
-
-        Logger::Instance().Shutdown();
-
-        if (quitThread.joinable()) {
-            quitThread.join();
-        }
-
-    } catch (const std::exception& ex) {
-        LOG_ERROR("[main] An error occurred: " + std::string(ex.what()));
-        if (mirror) {
-            mirror->Stop();
-        }
-        mirror.reset();
-        windowsManager.reset();
-        vmrManager.Shutdown();
-        Logger::Instance().Shutdown();
-        return EXIT_FAILURE;
-    }
-
     return EXIT_SUCCESS;
 }

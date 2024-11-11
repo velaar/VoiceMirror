@@ -11,7 +11,7 @@
                 "U:\\System\\Applications\\VoiceMirror\\VoiceMirror.conf"
             ],            
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "U:\\Code\\VoiceMirror\\build\\win-debug-x86\\bin",
             "environment": [],
             "console": "externalTerminal",
             "preLaunchTask": "CMake: Build x86 Debug",

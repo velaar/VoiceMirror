@@ -4,13 +4,24 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <optional>
 
 #include "VoicemeeterManager.h"
 #include "WindowsManager.h"
+#include "VolumeUtils.h"
 
+
+struct VolumeState {
+    float volume;
+    bool isMuted;
+
+    bool operator!=(const VolumeState& other) const {
+        return !VolumeUtils::IsFloatEqual(volume, other.volume) || isMuted != other.isMuted;
+    }
+};
 
 class VolumeMirror {
-public:
+   public:
     VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
                  float maxDbmVal, VoicemeeterManager& manager,
                  WindowsManager& windowsManager, bool playSound);
@@ -24,12 +35,9 @@ public:
     void UpdateVoicemeeterVolume(float volumePercent, bool isMuted);
     void UpdateWindowsVolume(float volumePercent, bool isMuted);
 
-private:
+   private:
     void OnWindowsVolumeChange(float newVolume, bool isMuted);
     void MonitorVoicemeeter();
-
-    // Suppression duration in milliseconds
-    static const int SUPPRESSION_DURATION_MS = 200; // Adjust as needed
 
     int channelIndex;
     ChannelType channelType;
@@ -39,30 +47,39 @@ private:
     VoicemeeterManager& vmManager;
     WindowsManager& windowsManager;
 
-    float lastWindowsVolume;
-    bool lastWindowsMute;
+    VolumeState lastWindowsState;
+    VolumeState lastVmState;
     float lastVmVolume;
-    bool lastVmMute;
 
+    std::mutex controlMutex;
+    std::mutex vmMutex;
+
+    std::thread monitorThread;
+    std::atomic<bool> running;
+    
+    bool lastWindowsMute;
     bool ignoreWindowsChange;
     bool ignoreVoicemeeterChange;
-    bool running;
     bool playSoundOnSync;
+    float lastWindowsVolume;
+
+
     bool pollingEnabled;
     int pollingInterval;
     int debounceDuration;
+    int suppressionDuration;
 
-    std::mutex vmMutex;       // Protects Voicemeeter-related variables
-    std::mutex controlMutex;  // Protects control variables
-    std::thread monitorThread;
-    int refCount;
-
-    // Change source tracking
-    ChangeSource lastChangeSource;
-
-    // Suppression windows
     std::chrono::steady_clock::time_point suppressVoicemeeterUntil;
     std::chrono::steady_clock::time_point suppressWindowsUntil;
+
+    ChangeSource lastChangeSource;
+ 
+    std::atomic<bool> isInitialSync;
+    std::atomic<bool> isUpdatingFromWindows; // Changed to atomic
+
+    std::optional<std::pair<float, bool>> pendingWindowsChange;
+    std::chrono::steady_clock::time_point debounceTimerStart;
+
 
     // Windows volume change callback
     std::function<void(float, bool)> windowsVolumeCallback;

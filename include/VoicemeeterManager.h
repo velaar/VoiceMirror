@@ -1,23 +1,15 @@
-#ifndef VOICEMEETER_MANAGER_H
-#define VOICEMEETER_MANAGER_H
-
 #pragma once
+#include <Windows.h>
 
-#include "RAIIHandle.h"
-#include <functional>
-#include <vector>
 #include <mutex>
+#include <string>
+#include <vector>
+
 #include "Defconf.h"
+#include "RAIIHandle.h"
 
-
-/**
- * @brief Manages interactions with the Voicemeeter API.
- *
- * This class handles initialization, communication, and control of the Voicemeeter application
- * using the Voicemeeter Remote API.
- */
 class VoicemeeterManager {
-public:
+   public:
     VoicemeeterManager();
     ~VoicemeeterManager();
 
@@ -25,42 +17,32 @@ public:
     VoicemeeterManager& operator=(const VoicemeeterManager&) = delete;
     VoicemeeterManager(VoicemeeterManager&&) = delete;
     VoicemeeterManager& operator=(VoicemeeterManager&&) = delete;
-   
-    // Initialization and Shutdown
+
     bool Initialize(int voicemeeterType);
     void Shutdown();
     void ShutdownCommand();
     void RestartAudioEngine(int beforeRestartDelay = 2, int afterRestartDelay = 2);
 
-    // Debug Mode
-    void SetDebugMode(bool newDebugMode);
-    bool GetDebugMode();
-
-    // Channel Operations
     bool SetMute(int channelIndex, ChannelType channelType, bool isMuted);
     bool GetChannelVolume(int channelIndex, ChannelType channelType, float& volumePercent);
     bool IsChannelMuted(int channelIndex, ChannelType channelType);
     bool GetVoicemeeterVolume(int channelIndex, ChannelType channelType, float& volumePercent, bool& isMuted);
     void UpdateVoicemeeterVolume(int channelIndex, ChannelType channelType, float volumePercent, bool isMuted);
 
-    // Parameter Checks
     bool IsParametersDirty();
 
-    // Listing Functions
     void ListAllChannels();
     void ListInputs();
     void ListOutputs();
 
-    // Mutexes for thread safety
     std::mutex toggleMutex;
     std::mutex channelMutex;
 
-private:
-    // Voicemeeter Remote DLL Management
+   private:
     bool LoadVoicemeeterRemote();
     void UnloadVoicemeeterRemote();
+    RAIIHMODULE hVoicemeeterRemote;
 
-    // Internal Mute Handling
     bool SetMuteInternal(int channelIndex, ChannelType channelType, bool isMuted);
 
     // Function pointer typedefs for Voicemeeter Remote API
@@ -74,11 +56,12 @@ private:
     typedef long(__stdcall* T_VBVMR_GetParameterStringA)(char* szParamName, char* szString);
     typedef long(__stdcall* T_VBVMR_GetParameterStringW)(char* szParamName, unsigned short* wszString);
     typedef long(__stdcall* T_VBVMR_SetParameterFloat)(char* szParamName, float Value);
+    typedef long(__stdcall* T_VBVMR_SetParameterStringA)(char* szParamName, const char* value);
+    typedef long(__stdcall* T_VBVMR_SetParameters)(const char* paramScript);
+    typedef long(__stdcall* T_VBVMR_Output_GetDeviceNumber)(void);
+    typedef long(__stdcall* T_VBVMR_Output_GetDeviceDescA)(int index, int* type, char* name, char* hardwareId);
 
-    // Voicemeeter Remote DLL handle
-    RAIIHMODULE hVoicemeeterRemote;
-
-    // Function pointers
+    // Function pointer declarations
     T_VBVMR_Login VBVMR_Login;
     T_VBVMR_Logout VBVMR_Logout;
     T_VBVMR_RunVoicemeeter VBVMR_RunVoicemeeter;
@@ -89,11 +72,16 @@ private:
     T_VBVMR_GetParameterStringA VBVMR_GetParameterStringA;
     T_VBVMR_GetParameterStringW VBVMR_GetParameterStringW;
     T_VBVMR_SetParameterFloat VBVMR_SetParameterFloat;
+    T_VBVMR_SetParameterStringA VBVMR_SetParameterStringA;
+    T_VBVMR_SetParameters VBVMR_SetParameters;
+    T_VBVMR_Output_GetDeviceNumber VBVMR_Output_GetDeviceNumber;
+    T_VBVMR_Output_GetDeviceDescA VBVMR_Output_GetDeviceDescA;
 
-    // Initialization flags
     bool initialized;
     bool loggedIn;
     bool debugMode;
-};
 
-#endif // VOICEMEETER_MANAGER_H
+    // Helper methods
+    std::string GetFirstWdmDeviceName();
+    bool SetA1Device(const std::string& deviceName);
+};

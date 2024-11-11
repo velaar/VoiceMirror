@@ -1,9 +1,11 @@
 #include "ConfigParser.h"
 
 #include <windows.h>
+
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -27,6 +29,17 @@ std::string ConfigParser::Trim(const std::string& str) {
 
 ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) {
     ToggleConfig toggleConfig;
+
+    // Check if toggleParam is empty
+    if (toggleParam.empty()) {
+        LOG_DEBUG("[ConfigParser::ParseToggleParameter] Using default values for empty toggle parameter.");
+        toggleConfig.type = DEFAULT_TYPE;
+        toggleConfig.index1 = DEFAULT_CHANNEL_INDEX;
+        toggleConfig.index2 = DEFAULT_CHANNEL_INDEX;
+        return toggleConfig;
+    }
+
+    // Parse the parameter
     std::istringstream ss(toggleParam);
     std::string segment;
     std::vector<std::string> segments;
@@ -40,7 +53,7 @@ ToggleConfig ConfigParser::ParseToggleParameter(const std::string& toggleParam) 
         throw std::runtime_error("Invalid toggle parameter format. Expected format: type:index1:index2 (e.g., 'input:0:1')");
     }
 
-    toggleConfig.type = segments[0].c_str();
+    toggleConfig.type = segments[0].c_str();  // Use c_str() for const char* type consistency
     try {
         toggleConfig.index1 = static_cast<uint8_t>(std::stoi(segments[1]));
         toggleConfig.index2 = static_cast<uint8_t>(std::stoi(segments[2]));
@@ -64,7 +77,7 @@ bool ConfigParser::SetupLogging(const Config& config) {
             return false;
         }
 
-        LOG_INFO("[ConfigParser::SetupLogging] Logging initialized. " + 
+        LOG_INFO("[ConfigParser::SetupLogging] Logging initialized. " +
                  (enableFileLogging ? "Log file: " + filePath : "Console output only."));
         return true;
     } catch (const std::exception& e) {
@@ -123,12 +136,10 @@ void ConfigParser::ValidateConfig(const Config& config) {
         throw std::runtime_error("Polling interval must be between 10 and 1000 milliseconds");
     }
 
-    bool validKey = (
-        (config.hotkeyVK.value >= 'A' && config.hotkeyVK.value <= 'Z') ||
-        (config.hotkeyVK.value >= 'a' && config.hotkeyVK.value <= 'z') ||
-        (config.hotkeyVK.value >= '0' && config.hotkeyVK.value <= '9') ||
-        (config.hotkeyVK.value >= VK_F1 && config.hotkeyVK.value <= VK_F24)
-    );
+    bool validKey = ((config.hotkeyVK.value >= 'A' && config.hotkeyVK.value <= 'Z') ||
+                     (config.hotkeyVK.value >= 'a' && config.hotkeyVK.value <= 'z') ||
+                     (config.hotkeyVK.value >= '0' && config.hotkeyVK.value <= '9') ||
+                     (config.hotkeyVK.value >= VK_F1 && config.hotkeyVK.value <= VK_F24));
 
     if (!validKey) {
         LOG_ERROR("[ConfigParser::ValidateConfig] Hotkey must be alphanumeric or F1-F24.");
@@ -169,7 +180,17 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
             LOG_DEBUG("[ConfigParser::ParseConfigFile] Parsing config key: " + key + " = " + value);
 
             try {
-                if (key == "chime") {
+                if (key == "monitor") {
+                    std::regex uuidRegex(R"(\{0\.0\.0\.\d{8}\}\.\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\})");
+                    if (!std::regex_match(value, uuidRegex)) {
+                        LOG_ERROR("[ConfigParser::ParseConfigFile] Invalid UUID format: " + value);
+                        throw std::runtime_error("Invalid UUID format. Expected format: {0.0.0.00000000}.{c0812d3f-cde9-4bf5-8386-d15a19978a0b}");
+                    }
+                    config.monitorDeviceUUID.value = value;
+                    config.monitorDeviceUUID.source = ConfigSource::ConfigFile;
+                }
+
+                else if (key == "chime") {
                     config.chime.value = (value == "true");
                     config.chime.source = ConfigSource::ConfigFile;
                 } else if (key == "debug") {
@@ -178,11 +199,8 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
                 } else if (key == "voicemeeter") {
                     config.voicemeeterType.value = static_cast<uint8_t>(std::stoi(value));
                     config.voicemeeterType.source = ConfigSource::ConfigFile;
-                } else if (key == "monitor") {
-                    config.monitorDeviceUUID.value = value.c_str();
-                    config.monitorDeviceUUID.source = ConfigSource::ConfigFile;
                 } else if (key == "toggle") {
-                    config.toggleParam.value = value.c_str();
+                    config.toggleParam.value = value;
                     config.toggleParam.source = ConfigSource::ConfigFile;
                 } else if (key == "polling") {
                     config.pollingEnabled.value = true;
@@ -218,7 +236,7 @@ void ConfigParser::ParseConfigFile(const std::string& configPath, Config& config
 cxxopts::Options ConfigParser::CreateOptions() {
     cxxopts::Options options("VoiceMirror", "Synchronize Windows Volume with Voicemeeter virtual channels");
 
-    options.add_options()
+  options.add_options()
         ("C,chime", "Enable chime sound on sync from Voicemeeter to Windows")
         ("L,list-channels", "List all Voicemeeter channels with their labels and exit")
         ("S,shutdown", "Shutdown all instances of the app and exit immediately")
@@ -226,30 +244,30 @@ cxxopts::Options ConfigParser::CreateOptions() {
         ("I,list-inputs", "List available Voicemeeter virtual inputs and exit")
         ("M,list-monitor", "List monitorable audio devices and exit")
         ("O,list-outputs", "List available Voicemeeter virtual outputs and exit")
-        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)", 
+        ("V,voicemeeter", "Specify which Voicemeeter to use (1: Basic, 2: Banana, 3: Potato)",
             cxxopts::value<uint8_t>()->default_value(std::to_string(DEFAULT_VOICEMEETER_TYPE)))
-        ("i,index", "Specify the Voicemeeter virtual channel index to use", 
+        ("i,index", "Specify the Voicemeeter virtual channel index to use",
             cxxopts::value<uint8_t>()->default_value(std::to_string(DEFAULT_CHANNEL_INDEX)))
-        ("min", "Minimum dBm for Voicemeeter channel", 
+        ("min", "Minimum dBm for Voicemeeter channel",
             cxxopts::value<int8_t>()->default_value(std::to_string(DEFAULT_MIN_DBM)))
-        ("max", "Maximum dBm for Voicemeeter channel", 
+        ("max", "Maximum dBm for Voicemeeter channel",
             cxxopts::value<int8_t>()->default_value(std::to_string(DEFAULT_MAX_DBM)))
-        ("p,polling-interval", "Enable polling mode with interval in milliseconds", 
+        ("p,polling-interval", "Enable polling mode with interval in milliseconds",
             cxxopts::value<uint16_t>()->default_value(std::to_string(DEFAULT_POLLING_INTERVAL_MS)))
-        ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)", 
+        ("s,startup-volume", "Set the initial Windows volume level as a percentage (0-100)",
             cxxopts::value<int8_t>()->default_value(std::to_string(DEFAULT_STARTUP_VOLUME_PERCENT)))
-        ("T,toggle", "Toggle parameter", 
-            cxxopts::value<std::string>()->default_value(DEFAULT_TOGGLE_PARAM))
+        ("T,toggle", "Toggle parameter",
+            cxxopts::value<std::string>()->default_value(""))
         ("d,debug", "Enable debug logging mode")
-        ("c,config", "Path to configuration file", 
+        ("c,config", "Path to configuration file",
             cxxopts::value<std::string>()->default_value(DEFAULT_CONFIG_FILE))
         ("hm,hotkey-modifiers", "Hotkey modifiers (e.g., Ctrl=2, Alt=1, Shift=4, Win=8). Combine using bitwise OR (e.g., 3 for Ctrl+Alt)",
             cxxopts::value<uint16_t>()->default_value(std::to_string(DEFAULT_HOTKEY_MODIFIERS)))
         ("hk,hotkey-key", "Hotkey virtual key code (e.g., R=82, F5=116)",
             cxxopts::value<uint8_t>()->default_value(std::to_string(DEFAULT_HOTKEY_VK)))
-        ("log", "Enable logging with specified log file path", 
+        ("log", "Enable logging with specified log file path",
             cxxopts::value<std::string>()->default_value(DEFAULT_LOG_FILE))
-        ("startup-sound", "Enable startup sound", 
+        ("startup-sound", "Enable startup sound",
             cxxopts::value<bool>()->default_value("false"))
         ("help", "Print help")
         ("version", "Print version");
@@ -325,7 +343,7 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
     if (result.count("hotkey-modifiers")) {
         config.hotkeyModifiers.value = result["hotkey-modifiers"].as<uint16_t>();
         config.hotkeyModifiers.source = ConfigSource::CommandLine;
-        LOG_DEBUG("[ConfigParser::ApplyCommandLineOptions] Hotkey modifiers set to: " + config.hotkeyModifiers.value) ;
+        LOG_DEBUG("[ConfigParser::ApplyCommandLineOptions] Hotkey modifiers set to: " + config.hotkeyModifiers.value);
     }
     if (result.count("hotkey-key")) {
         config.hotkeyVK.value = result["hotkey-key"].as<uint8_t>();
@@ -345,27 +363,36 @@ void ConfigParser::ApplyCommandLineOptions(const cxxopts::ParseResult& result, C
         config.startupSoundFilePath.source = ConfigSource::CommandLine;
         LOG_DEBUG(std::string("[ConfigParser::ApplyCommandLineOptions] Startup sound file path set to: ") + std::string(config.startupSoundFilePath.value));
     }
-    if (result.count("startup-sound-delay")) {
-        config.startupSoundDelay.value = static_cast<uint16_t>(result["startup-sound-delay"].as<int>());
-        config.startupSoundDelay.source = ConfigSource::CommandLine;
-        LOG_DEBUG("[ConfigParser::ApplyCommandLineOptions] Startup sound delay set to: " + std::to_string(config.startupSoundDelay.value) + "ms");
+    if (result.count("startup-delay")) {
+        config.startupDelay.value = static_cast<uint16_t>(result["startup-delay"].as<int>());
+        config.startupDelay.source = ConfigSource::CommandLine;
+        LOG_DEBUG("[ConfigParser::ApplyCommandLineOptions] Startup delay set to: " + std::to_string(config.startupDelay.value) + "ms");
+    }
+    if (result.count("monitor")) {
+        config.monitorDeviceUUID.value = result["monitor"].as<std::string>();
+        config.monitorDeviceUUID.source = ConfigSource::CommandLine;
+        LOG_DEBUG("[ConfigParser::ApplyCommandLineOptions] MonitorDeviceUUID set to: " + config.monitorDeviceUUID.value);
     }
 }
 
 void ConfigParser::LogConfiguration(const Config& config) {
     std::ostringstream oss;
-    oss << "Startup Configuration:\n";
+    oss << "\n\n====\nStartup Configuration:\n\n";
 
     auto logOption = [&](const std::string& name, const std::string& value, ConfigSource source) {
         std::string sourceStr;
         switch (source) {
-            case ConfigSource::Default: sourceStr = "[def]"; break;
-            case ConfigSource::ConfigFile: sourceStr = "[conf]"; break;
-            case ConfigSource::CommandLine: sourceStr = "[cmd]"; break;
+            case ConfigSource::Default:
+                sourceStr = "[def]";
+                break;
+            case ConfigSource::ConfigFile:
+                sourceStr = "[cnf]";
+                break;
+            case ConfigSource::CommandLine:
+                sourceStr = "[cmd]";
+                break;
         }
-        oss << sourceStr << " " << name << ": " << value << "\n";
-    };
-
+    oss << sourceStr << " " << name << ": " << (!value.empty() ? value : "None") << "\n"; };
     logOption("configFilePath", config.configFilePath.value, config.configFilePath.source);
     logOption("logFilePath", config.logFilePath.value, config.logFilePath.source);
     logOption("debug", config.debug.value ? "true" : "false", config.debug.source);
@@ -384,7 +411,7 @@ void ConfigParser::LogConfiguration(const Config& config) {
     logOption("minDbm", std::to_string(config.minDbm.value), config.minDbm.source);
     logOption("monitorDeviceUUID", config.monitorDeviceUUID.value, config.monitorDeviceUUID.source);
     logOption("toggleParam", config.toggleParam.value, config.toggleParam.source);
-    logOption("toggleCommand", config.toggleCommand.value ? config.toggleCommand.value : "None", config.toggleCommand.source);
+    logOption("toggleCommand", config.toggleCommand.value, config.toggleCommand.source);  
     logOption("pollingInterval", std::to_string(config.pollingInterval.value), config.pollingInterval.source);
     logOption("type", config.type.value, config.type.source);
     logOption("listMonitor", config.listMonitor.value ? "true" : "false", config.listMonitor.source);
@@ -394,7 +421,10 @@ void ConfigParser::LogConfiguration(const Config& config) {
     logOption("hotkeyModifiers", std::to_string(config.hotkeyModifiers.value), config.hotkeyModifiers.source);
     logOption("hotkeyVK", std::to_string(config.hotkeyVK.value), config.hotkeyVK.source);
 
+    oss << "====\n\n";
+
     LOG_DEBUG("[ConfigParser::LogConfiguration] " + oss.str());
+
 }
 
 bool ConfigParser::HandleSpecialCommands(const Config& config) {

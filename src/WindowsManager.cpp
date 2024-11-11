@@ -8,6 +8,9 @@
 #include <propvarutil.h>
 #include <windows.h>
 #include <wrl/client.h>
+#include <fstream>
+#include <vector>
+
 
 #include <algorithm>
 #include <chrono>
@@ -66,12 +69,6 @@ WindowsManager::WindowsManager(const Config& config)
             // Not throwing exception as hotkey might be optional
         }
 
-        // Play startup sound if enabled
-        if (config_.startupSound.value) {
-            PlayStartupSound(
-                UTF8ToWideString(config_.startupSoundFilePath.value ? config_.startupSoundFilePath.value : DEFAULT_STARTUP_SOUND_FILE),
-                config_.startupSoundDelay.value);
-        }
     } catch (const std::exception& e) {
         LOG_ERROR("[WindowsManager::WindowsManager] Exception caught: " + std::string(e.what()));
         Cleanup();
@@ -539,10 +536,6 @@ STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
     }
     LOG_DEBUG("[WindowsManager::OnNotify] Volume change callbacks executed.");
 
-    // Optionally play sync sound
-    if (config_.chime.value) {
-        PlaySyncSound();
-    }
 
     return S_OK;
 }
@@ -636,25 +629,49 @@ void WindowsManager::HandleDeviceUnplugged() {
     }
 }
 
-// Play Startup Sound
+
 void WindowsManager::PlayStartupSound(const std::wstring& soundFilePath, uint16_t delayMs) {
     LOG_DEBUG("[WindowsManager::PlayStartupSound] Preparing to play startup sound.");
 
-    std::wstring wideFilePath = soundFilePath.empty() 
-                                ? L"" 
-                                : soundFilePath; // Default to empty if soundFilePath isn't provided
+    // Check if the sound file path is empty
+    if (soundFilePath.empty()) {
+        LOG_ERROR("[WindowsManager::PlayStartupSound] Sound file path is empty.");
+        return;
+    }
+
+    // Load the sound file into memory
+    std::ifstream soundFile(soundFilePath, std::ios::binary | std::ios::ate);
+    if (!soundFile) {
+        LOG_ERROR("[WindowsManager::PlayStartupSound] Failed to open sound file.");
+        return;
+    }
+
+    // Get the file size and allocate memory buffer
+    std::streamsize fileSize = soundFile.tellg();
+    soundFile.seekg(0, std::ios::beg);
+std::vector<char> soundBuffer(static_cast<unsigned int>(fileSize)); // Explicit cast to unsigned int
+
+    if (!soundFile.read(soundBuffer.data(), fileSize)) {
+        LOG_ERROR("[WindowsManager::PlayStartupSound] Failed to read sound file.");
+        return;
+    }
+
+    soundFile.close();
 
     // Spawn a thread to play the sound asynchronously after a delay
-    std::thread([wideFilePath, delayMs]() {
+    std::thread([buffer = std::move(soundBuffer), delayMs]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
-        if (!wideFilePath.empty() && !PlaySoundW(wideFilePath.c_str(), NULL, SND_FILENAME | SND_ASYNC)) {
-            LOG_ERROR("[WindowsManager::PlayStartupSound] Failed to play startup sound. Error code: " + std::to_string(GetLastError()));
+
+        // Play sound from memory
+        if (!PlaySoundW(reinterpret_cast<LPCWSTR>(buffer.data()), NULL, SND_MEMORY | SND_ASYNC)) {
+            LOG_ERROR("[WindowsManager::PlayStartupSound] Failed to play startup sound from memory. Error code: " + std::to_string(GetLastError()));
         } else {
             LOG_INFO("[WindowsManager::PlayStartupSound] Startup sound played successfully.");
         }
+
+        // The buffer goes out of scope here and will be released from memory
     }).detach();
 }
-
 
 // Play Sync Sound
 void WindowsManager::PlaySyncSound() {
