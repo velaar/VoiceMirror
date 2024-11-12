@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
 
     SoundManager::Instance().Initialize(
         ConvertToWString(appConfig.startupSoundFilePath.value),
-        ConvertToWString(appConfig.startupSoundFilePath.value));
+        ConvertToWString(appConfig.syncSoundFilePath.value));
 
     std::unique_ptr<WindowsManager> windowsManager;
     try {

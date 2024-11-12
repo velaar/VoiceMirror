@@ -6,6 +6,8 @@
 #include <optional>
 #include <thread>
 
+
+#include "Defconf.h" 
 #include "VoicemeeterManager.h"
 #include "VolumeUtils.h"
 #include "WindowsManager.h"
@@ -65,19 +67,9 @@ class VolumeMirror {
 
     bool pollingEnabled;
     int pollingInterval;
-    int debounceDuration;
-    int suppressionDuration;
-
-    std::chrono::steady_clock::time_point suppressVoicemeeterUntil;
-    std::chrono::steady_clock::time_point suppressWindowsUntil;
-
-    ChangeSource lastChangeSource;
+    UpdateSource lastUpdateSource;
 
     std::atomic<bool> isInitialSync;
-    std::atomic<bool> isUpdatingFromWindows;  // Changed to atomic
-
-    std::optional<std::pair<float, bool>> pendingWindowsChange;
-    std::chrono::steady_clock::time_point debounceTimerStart;
     CallbackID windowsVolumeCallbackID;
     std::function<void(float, bool)> windowsVolumeCallback;
 };

@@ -141,6 +141,13 @@ enum class LogLevel {
     ERR       ///< Error events that might still allow the application to continue.
 };
 
+enum class UpdateSource {
+    None,
+    Windows,
+    Voicemeeter
+};
+
+
 template <typename T>
 struct ConfigOption {
     T value;

@@ -28,6 +28,7 @@ WindowsManager::WindowsManager(const Config& config)
       syncSoundFilePath_(config.syncSoundFilePath.value ? WideStringToUTF8(config.syncSoundFilePath.value) : WideStringToUTF8(DEFAULT_SYNC_SOUND_FILE)),
       comInitialized_(false),
       hwndHotkeyWindow_(nullptr) {
+    LOG_DEBUG("[WindowsManager::WindowsManager] Initializing WindowsManager with config values.");
     try {
         if (!InitializeCOM())
             throw std::runtime_error("COM initialization failed");
@@ -42,21 +43,27 @@ WindowsManager::WindowsManager(const Config& config)
         if (FAILED(hr))
             throw std::runtime_error("Device notification registration failed");
 
+        LOG_DEBUG("[WindowsManager::WindowsManager] Successfully registered volume and device notifications.");
         InitializeHotkey();
-    } catch (...) {
+    } catch (const std::exception& ex) {
+        LOG_ERROR(std::string("[WindowsManager::WindowsManager] Initialization failed: ") + ex.what());
         Cleanup();
         UninitializeCOM();
         throw;
     }
 }
-
 // Destructor
 WindowsManager::~WindowsManager() {
+    LOG_DEBUG("[WindowsManager::~WindowsManager] Cleaning up WindowsManager resources.");
     CleanupHotkey();
-    if (endpointVolume_)
+    if (endpointVolume_) {
         endpointVolume_->UnregisterControlChangeNotify(this);
-    if (deviceEnumerator_)
+        LOG_DEBUG("[WindowsManager::~WindowsManager] Unregistered volume change notification.");
+    }
+    if (deviceEnumerator_) {
         deviceEnumerator_->UnregisterEndpointNotificationCallback(this);
+        LOG_DEBUG("[WindowsManager::~WindowsManager] Unregistered device notification callback.");
+    }
     Cleanup();
     UninitializeCOM();
 }
@@ -83,17 +90,27 @@ void WindowsManager::UninitializeCOM() {
     }
 }
 
-// Initialize COM Interfaces
+// COM Interface Initialization
 bool WindowsManager::InitializeCOMInterfaces() {
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(deviceEnumerator_.GetAddressOf()));
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::InitializeCOMInterfaces] Failed to create MMDeviceEnumerator. HRESULT: " + std::to_string(hr));
+        return false;
+    }
 
     hr = deviceEnumerator_->GetDefaultAudioEndpoint(eRender, eConsole, &speakers_);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::InitializeCOMInterfaces] Failed to get default audio endpoint. HRESULT: " + std::to_string(hr));
+        return false;
+    }
 
     hr = speakers_->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(endpointVolume_.GetAddressOf()));
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::InitializeCOMInterfaces] Failed to activate IAudioEndpointVolume. HRESULT: " + std::to_string(hr));
+        return false;
+    }
 
+    LOG_DEBUG("[WindowsManager::InitializeCOMInterfaces] Successfully initialized COM interfaces.");
     return true;
 }
 
@@ -117,20 +134,25 @@ void WindowsManager::ReinitializeCOMInterfaces() {
 
 // Set Volume
 bool WindowsManager::SetVolume(float volumePercent) {
-    if (volumePercent < 0.0f || volumePercent > 100.0f)
+    if (volumePercent < 0.0f || volumePercent > 100.0f) {
+        LOG_WARNING("[WindowsManager::SetVolume] Invalid volume percentage: " + std::to_string(volumePercent));
         return false;
+    }
 
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
+        LOG_WARNING("[WindowsManager::SetVolume] endpointVolume_ not initialized; attempting reinitialization.");
         try {
             ReinitializeCOMInterfaces();
-        } catch (...) {
+        } catch (const std::exception& ex) {
+            LOG_ERROR(std::string("[WindowsManager::SetVolume] Failed to reinitialize COM interfaces: ") + ex.what());
             return false;
         }
     }
 
     float scalar = VolumeUtils::PercentToScalar(volumePercent);
     HRESULT hr = endpointVolume_->SetMasterVolumeLevelScalar(scalar, nullptr);
+    LOG_DEBUG("[WindowsManager::SetVolume] Set volume to " + std::to_string(volumePercent) + "% (scalar: " + std::to_string(scalar) + "). Result: " + std::to_string(hr));
     return SUCCEEDED(hr);
 }
 
@@ -138,14 +160,17 @@ bool WindowsManager::SetVolume(float volumePercent) {
 bool WindowsManager::SetMute(bool mute) {
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
+        LOG_WARNING("[WindowsManager::SetMute] endpointVolume_ not initialized; attempting reinitialization.");
         try {
             ReinitializeCOMInterfaces();
-        } catch (...) {
+        } catch (const std::exception& ex) {
+            LOG_ERROR(std::string("[WindowsManager::SetMute] Failed to reinitialize COM interfaces: ") + ex.what());
             return false;
         }
     }
 
     HRESULT hr = endpointVolume_->SetMute(mute, nullptr);
+    LOG_DEBUG("[WindowsManager::SetMute] Set mute to " + std::string(mute ? "true" : "false") + ". Result: " + std::to_string(hr));
     return SUCCEEDED(hr);
 }
 
@@ -153,13 +178,16 @@ bool WindowsManager::SetMute(bool mute) {
 float WindowsManager::GetVolume() const {
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
+        LOG_WARNING("[WindowsManager::GetVolume] endpointVolume_ not initialized; attempting reinitialization.");
         const_cast<WindowsManager*>(this)->ReinitializeCOMInterfaces();
     }
 
     float currentVolume = 0.0f;
     HRESULT hr = endpointVolume_->GetMasterVolumeLevelScalar(&currentVolume);
+    LOG_DEBUG("[WindowsManager::GetVolume] Current volume: " + std::to_string(VolumeUtils::ScalarToPercent(currentVolume)) + "% (scalar: " + std::to_string(currentVolume) + "). Result: " + std::to_string(hr));
     return SUCCEEDED(hr) ? VolumeUtils::ScalarToPercent(currentVolume) : -1.0f;
 }
+
 
 // Get Mute
 bool WindowsManager::GetMute() const {
@@ -190,7 +218,6 @@ CallbackID WindowsManager::RegisterVolumeChangeCallback(std::function<void(float
     throw std::runtime_error("Maximum number of callbacks reached.");
 }
 
-
 // Unregister Callback
 bool WindowsManager::UnregisterVolumeChangeCallback(CallbackID id) {
     std::lock_guard<std::mutex> lock(callbackMutex_);
@@ -198,9 +225,11 @@ bool WindowsManager::UnregisterVolumeChangeCallback(CallbackID id) {
         if (callbackIDs_[i].has_value() && callbackIDs_[i].value() == id) {
             callbacks_[i] = nullptr;
             callbackIDs_[i].reset();
+            LOG_DEBUG("[WindowsManager::UnregisterVolumeChangeCallback] Unregistered callback ID: " + std::to_string(id));
             return true;
         }
     }
+    LOG_WARNING("[WindowsManager::UnregisterVolumeChangeCallback] Failed to find callback ID: " + std::to_string(id));
     return false;
 }
 
@@ -301,26 +330,31 @@ WindowsManager::Release() {
     return ulRef;
 }
 
-float previousVolume = -1.0f; 
+// OnNotify Callback
 STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
-    if (!pNotify) return E_POINTER;
+    if (!pNotify) {
+        LOG_ERROR("[WindowsManager::OnNotify] Received null notification data.");
+        return E_POINTER;
+    }
 
     float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
     bool newMute = (pNotify->bMuted != FALSE);
 
+    LOG_DEBUG("[WindowsManager::OnNotify] Notification received. Volume: " + std::to_string(newVolume) + "%, Mute: " + (newMute ? "Muted" : "Unmuted"));
+
     if (std::abs(newVolume - previousVolume) < 1.0f && newMute == previousMute) {
-        // Skip if volume change is minimal and mute state hasn’t changed
+        LOG_DEBUG("[WindowsManager::OnNotify] Change is below threshold, skipping update.");
         return S_OK;
     }
 
     previousVolume = newVolume;
     previousMute = newMute;
 
-    LOG_DEBUG("[WindowsManager::OnNotify] Executing callback with volume: " +
-              std::to_string(newVolume) + ", mute: " + (newMute ? "Muted" : "Unmuted"));
-              
     for (const auto& callback : callbacks_) {
-        if (callback) callback(newVolume, newMute);
+        if (callback) {
+            LOG_DEBUG("[WindowsManager::OnNotify] Executing registered volume change callback with Volume: " + std::to_string(newVolume) + "%, Mute: " + (newMute ? "Muted" : "Unmuted"));
+            callback(newVolume, newMute);
+        }
     }
 
     return S_OK;

@@ -2,14 +2,7 @@
 #include "SoundManager.h"
 #include <Windows.h>
 #include <future> // For std::async
-
-// Helper function to convert wstring to string for logging (done in place)
-std::string WideStringToString(const std::wstring& wstr) {
-    int bufferSize = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-    std::string str(bufferSize, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &str[0], bufferSize, nullptr, nullptr);
-    return str;
-}
+#include "VolumeUtils.h"
 
 // Singleton instance access
 SoundManager& SoundManager::Instance() {
@@ -51,50 +44,43 @@ bool SoundManager::PlaySyncSound(uint16_t delayMs) {
 // Play Sound Internally
 bool SoundManager::PlaySoundInternal(const std::wstring& soundFilePath, uint16_t delayMs, bool playSync) {
     if (shuttingDown_) {
-        LOG_WARNING("[SoundManager::PlaySoundInternal] Shutdown in progress. Aborting sound playback.");
+        LOG_WARNING(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Shutdown in progress. Aborting sound playback."));
         return false;
     }
 
-    // Lambda to handle playback
     auto playSound = [this, soundFilePath, delayMs, playSync]() {
         if (delayMs > 0) {
-            LOG_DEBUG("[SoundManager::PlaySoundInternal] Delaying sound playback by " + std::to_string(delayMs) + " ms.");
+            LOG_DEBUG(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Delaying sound playback by " + std::to_wstring(delayMs) + L" ms."));
             std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
         }
 
-        // Validate sound file path
         if (soundFilePath.empty()) {
-            LOG_ERROR("[SoundManager::PlaySoundInternal] Sound file path is empty.");
+            LOG_ERROR(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Sound file path is empty."));
             return;
         }
 
-        // Check if file exists
         DWORD fileAttrib = GetFileAttributesW(soundFilePath.c_str());
         if (fileAttrib == INVALID_FILE_ATTRIBUTES || (fileAttrib & FILE_ATTRIBUTE_DIRECTORY)) {
-            LOG_ERROR("[SoundManager::PlaySoundInternal] Sound file does not exist or is a directory: " + WideStringToString(soundFilePath));
+            LOG_ERROR(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Sound file does not exist or is a directory: " + soundFilePath));
             return;
         }
 
-        // Play the sound and add SND_PURGE after
-        LOG_INFO("[SoundManager::PlaySoundInternal] Playing sound: " + WideStringToString(soundFilePath) + (playSync ? " synchronously." : " asynchronously."));
+        LOG_INFO(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Playing sound: " + soundFilePath + (playSync ? L" synchronously." : L" asynchronously.")));
         BOOL result = PlaySoundW(soundFilePath.c_str(), NULL, SND_FILENAME | (playSync ? SND_SYNC : SND_ASYNC));
         if (!result) {
-            LOG_ERROR("[SoundManager::PlaySoundInternal] Failed to play sound. Error code: " + std::to_string(GetLastError()));
+            LOG_ERROR(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Failed to play sound. Error code: " + std::to_wstring(GetLastError())));
         } else {
-            LOG_INFO("[SoundManager::PlaySoundInternal] Sound played successfully.");
+            LOG_INFO(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Sound played successfully."));
         }
 
-        // Immediately release memory associated with sound
         PlaySoundW(NULL, NULL, SND_PURGE);
     };
 
     if (playSync) {
-        // Synchronous playback
         playSound();
     } else {
-        // Asynchronous playback using std::async for automatic thread management
         std::future<void> asyncResult = std::async(std::launch::async, playSound);
-        LOG_INFO("[SoundManager::PlaySoundInternal] Asynchronous sound playback started.");
+        LOG_INFO(ConvertWStringToString(L"[SoundManager::PlaySoundInternal] Asynchronous sound playback started."));
     }
 
     return true;
