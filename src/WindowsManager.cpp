@@ -8,19 +8,17 @@
 #include <propvarutil.h>
 #include <windows.h>
 #include <wrl/client.h>
-#include <fstream>
-#include <vector>
-
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 #include "Defconf.h"
 #include "Logger.h"
 #include "VolumeUtils.h"  // Assumed utility for volume conversions
-
 
 // Constructor
 WindowsManager::WindowsManager(const Config& config)
@@ -28,7 +26,7 @@ WindowsManager::WindowsManager(const Config& config)
       hotkeyModifiers_(config.hotkeyModifiers.value),
       hotkeyVK_(config.hotkeyVK.value),
       syncSoundFilePath_(config.syncSoundFilePath.value ? WideStringToUTF8(config.syncSoundFilePath.value) : WideStringToUTF8(DEFAULT_SYNC_SOUND_FILE)),
-          comInitialized_(false),
+      comInitialized_(false),
       hwndHotkeyWindow_(nullptr) {
     try {
         if (!InitializeCOM())
@@ -183,11 +181,15 @@ CallbackID WindowsManager::RegisterVolumeChangeCallback(std::function<void(float
             CallbackID id = nextCallbackID_++;
             callbacks_[i] = std::move(callback);
             callbackIDs_[i] = id;
+
+            LOG_DEBUG("[WindowsManager::RegisterVolumeChangeCallback] Registered callback ID: " + std::to_string(id));
             return id;
         }
     }
+    LOG_ERROR("[WindowsManager::RegisterVolumeChangeCallback] Maximum number of callbacks reached.");
     throw std::runtime_error("Maximum number of callbacks reached.");
 }
+
 
 // Unregister Callback
 bool WindowsManager::UnregisterVolumeChangeCallback(CallbackID id) {
@@ -299,22 +301,26 @@ WindowsManager::Release() {
     return ulRef;
 }
 
-// IAudioEndpointVolumeCallback
+float previousVolume = -1.0f; 
 STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
-    if (!pNotify)
-        return E_POINTER;
+    if (!pNotify) return E_POINTER;
 
     float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
     bool newMute = (pNotify->bMuted != FALSE);
 
-    std::array<std::function<void(float, bool)>, MAX_CALLBACKS> callbacksCopy;
-    {
-        std::lock_guard<std::mutex> lock(callbackMutex_);
-        callbacksCopy = callbacks_;
+    if (std::abs(newVolume - previousVolume) < 1.0f && newMute == previousMute) {
+        // Skip if volume change is minimal and mute state hasn’t changed
+        return S_OK;
     }
-    for (const auto& callback : callbacksCopy) {
-        if (callback)
-            callback(newVolume, newMute);
+
+    previousVolume = newVolume;
+    previousMute = newMute;
+
+    LOG_DEBUG("[WindowsManager::OnNotify] Executing callback with volume: " +
+              std::to_string(newVolume) + ", mute: " + (newMute ? "Muted" : "Unmuted"));
+              
+    for (const auto& callback : callbacks_) {
+        if (callback) callback(newVolume, newMute);
     }
 
     return S_OK;
@@ -335,7 +341,6 @@ STDMETHODIMP WindowsManager::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD d
     }
     return S_OK;
 }
-
 
 // Handle Device Plugged In
 void WindowsManager::HandleDevicePluggedIn() {
@@ -384,7 +389,6 @@ STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow flow, ERole role, 
     return S_OK;
 }
 
-
 STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) {
     std::wstring wsDeviceId(pwstrDeviceId);
     std::string deviceId = WideStringToUTF8(wsDeviceId);
@@ -393,8 +397,6 @@ STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const
     // Handle property value change if necessary
     return S_OK;
 }
-
-
 
 // Check Device
 void WindowsManager::CheckDevice(LPCWSTR deviceId, bool isAdded) {
@@ -407,7 +409,6 @@ void WindowsManager::CheckDevice(LPCWSTR deviceId, bool isAdded) {
             HandleDeviceUnplugged();
     }
 }
-
 
 // Play Sound
 void WindowsManager::PlaySoundFromFile(const std::wstring& soundFilePath, uint16_t delayMs, bool playSync) {

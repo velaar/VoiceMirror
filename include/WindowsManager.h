@@ -99,6 +99,9 @@ class WindowsManager : public IAudioEndpointVolumeCallback, public IMMNotificati
     STDMETHODIMP_(ULONG)
     Release() override;
 
+    float previousVolume = -1.0f;
+    bool previousMute = false;
+    
     STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
     STDMETHODIMP OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) override;
     STDMETHODIMP OnDeviceAdded(LPCWSTR pwstrDeviceId) override;
