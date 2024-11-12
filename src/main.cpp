@@ -18,6 +18,7 @@
 #include "Defconf.h"
 #include "Logger.h"
 #include "RAIIHandle.h"
+#include "SoundManager.h"
 #include "VoicemeeterManager.h"
 #include "VolumeMirror.h"
 #include "VolumeUtils.h"
@@ -64,23 +65,6 @@ void signalHandler(int signum) {
     }
 }
 
-// Helper function to convert const char* to std::wstring
-std::wstring ConvertToWString(const char* str) {
-    if (!str) {
-        return L"";
-    }
-    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
-    if (size_needed <= 0) {
-        return L"";
-    }
-    std::wstring wstr(size_needed, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str, -1, &wstr[0], size_needed);
-    if (!wstr.empty() && wstr.back() == L'\0') {
-        wstr.pop_back();
-    }
-    return wstr;
-}
-
 int main(int argc, char* argv[]) {
     Application appState;
     g_appStatePtr = &appState;  // Assign the global pointer for signal handler
@@ -114,9 +98,15 @@ int main(int argc, char* argv[]) {
         }
         return EXIT_SUCCESS;
     }
+    RAIIHandle quitEventHandle(CreateEventA(NULL, TRUE, FALSE, EVENT_NAME));
+    if (!quitEventHandle.get()) {
+        LOG_ERROR("[main] Failed to create or open quit event. Error: " + std::to_string(GetLastError()));
+        return EXIT_FAILURE;
+    }
 
-    RAIIHandle rawMutex(CreateMutexA(NULL, FALSE, MUTEX_NAME));
-    if (!rawMutex.get()) {
+    // Initialize mutex with RAIIHandle
+    RAIIHandle mutexHandle(CreateMutexA(NULL, FALSE, MUTEX_NAME));
+    if (!mutexHandle.get()) {
         LOG_ERROR("[main] Failed to create mutex.");
         return EXIT_FAILURE;
     }
@@ -142,6 +132,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    SoundManager::Instance().Initialize(
+        ConvertToWString(appConfig.startupSoundFilePath.value),
+        ConvertToWString(appConfig.startupSoundFilePath.value));
+
     std::unique_ptr<WindowsManager> windowsManager;
     try {
         windowsManager = std::make_unique<WindowsManager>(appConfig);
@@ -151,9 +145,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-
     VoicemeeterManager vmrManager;
-
 
     if (!vmrManager.Initialize(appConfig.voicemeeterType.value)) {
         LOG_ERROR("[main] Failed to initialize and log in to Voicemeeter.");
@@ -182,7 +174,6 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
 
-  
     if (!appConfig.toggleParam.value.empty()) {
         ToggleConfig toggleConfig;
         try {
@@ -230,7 +221,7 @@ int main(int argc, char* argv[]) {
                 return EXIT_FAILURE;
             }
 
-            windowsManager->onDevicePluggedIn = [&vmrManager, &toggleConfig]() {
+            windowsManager->SetDevicePluggedInCallback([&vmrManager, &toggleConfig]() {
                 std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
                 vmrManager.RestartAudioEngine();
                 ChannelType channelType = (std::string(toggleConfig.type) == "input")
@@ -238,16 +229,16 @@ int main(int argc, char* argv[]) {
                                               : ChannelType::Output;
                 vmrManager.SetMute(toggleConfig.index1, channelType, false);
                 vmrManager.SetMute(toggleConfig.index2, channelType, true);
-            };
+            });
 
-            windowsManager->onDeviceUnplugged = [&vmrManager, &toggleConfig]() {
+            windowsManager->SetDeviceUnpluggedCallback([&vmrManager, &toggleConfig]() {
                 std::lock_guard<std::mutex> lock(vmrManager.toggleMutex);
                 ChannelType channelType = (std::string(toggleConfig.type) == "input")
                                               ? ChannelType::Input
                                               : ChannelType::Output;
                 vmrManager.SetMute(toggleConfig.index1, channelType, true);
                 vmrManager.SetMute(toggleConfig.index2, channelType, false);
-            };
+            });
         }
 
         uint8_t channelIndex = appConfig.index.value;
@@ -293,11 +284,10 @@ int main(int argc, char* argv[]) {
                 }
             }
 
+            // Play startup sound synchronously
             if (appConfig.startupSound.value) {
-                std::thread startupSoundThread([&]() {
-                    windowsManager->PlayStartupSound(ConvertToWString(appConfig.startupSoundFilePath.value), appConfig.startupDelay.value);
-                });
-                startupSoundThread.detach();
+                std::wstring startupSoundPath = ConvertToWString(appConfig.startupSoundFilePath.value);
+                SoundManager::Instance().PlayStartupSound();  // playSync = true
             }
 
             if (isMonitoring) {

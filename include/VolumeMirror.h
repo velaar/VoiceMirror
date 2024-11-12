@@ -3,13 +3,12 @@
 #include <chrono>
 #include <functional>
 #include <mutex>
-#include <thread>
 #include <optional>
+#include <thread>
 
 #include "VoicemeeterManager.h"
-#include "WindowsManager.h"
 #include "VolumeUtils.h"
-
+#include "WindowsManager.h"
 
 struct VolumeState {
     float volume;
@@ -22,9 +21,10 @@ struct VolumeState {
 
 class VolumeMirror {
    public:
-    VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
-                 float maxDbmVal, VoicemeeterManager& manager,
-                 WindowsManager& windowsManager, bool playSound);
+    VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
+                               float maxDbmVal, VoicemeeterManager& manager,
+                               WindowsManager& windowsManager,
+                               bool playSound);
     ~VolumeMirror();
 
     void Start();
@@ -56,13 +56,12 @@ class VolumeMirror {
 
     std::thread monitorThread;
     std::atomic<bool> running;
-    
+
     bool lastWindowsMute;
     bool ignoreWindowsChange;
     bool ignoreVoicemeeterChange;
     bool playSoundOnSync;
     float lastWindowsVolume;
-
 
     bool pollingEnabled;
     int pollingInterval;
@@ -73,14 +72,12 @@ class VolumeMirror {
     std::chrono::steady_clock::time_point suppressWindowsUntil;
 
     ChangeSource lastChangeSource;
- 
+
     std::atomic<bool> isInitialSync;
-    std::atomic<bool> isUpdatingFromWindows; // Changed to atomic
+    std::atomic<bool> isUpdatingFromWindows;  // Changed to atomic
 
     std::optional<std::pair<float, bool>> pendingWindowsChange;
     std::chrono::steady_clock::time_point debounceTimerStart;
-
-
-    // Windows volume change callback
+    CallbackID windowsVolumeCallbackID;
     std::function<void(float, bool)> windowsVolumeCallback;
 };

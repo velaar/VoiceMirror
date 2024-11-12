@@ -1,5 +1,4 @@
-#ifndef LOGGER_H
-#define LOGGER_H
+#pragma once
 
 #include <chrono>
 #include <ctime>
@@ -55,4 +54,3 @@ private:
 #define LOG_WARNING(message) Logger::Instance().Log(LogLevel::WARNING, message)
 #define LOG_ERROR(message) Logger::Instance().Log(LogLevel::ERR, message)
 
-#endif  // LOGGER_H

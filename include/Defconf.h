@@ -19,10 +19,10 @@ constexpr const char COM_INIT_MUTEX_NAME[] = "Global\\VoiceMirrorCOMInitMutex";
 
 constexpr const char* DEFAULT_DLL_PATH_64 = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote64.dll";
 constexpr const char* DEFAULT_DLL_PATH_32 = "C:\\Program Files (x86)\\VB\\Voicemeeter\\VoicemeeterRemote.dll";
-
+constexpr size_t MAX_CALLBACKS = 3; 
 constexpr const char* DEFAULT_CONFIG_FILE = "VoiceMirror.conf";
 constexpr const char* DEFAULT_LOG_FILE = "VoiceMirror.log";
-constexpr const char* DEFAULT_STARTUP_SOUND_FILE = "w95.wav";
+constexpr const char* DEFAULT_STARTUP_SOUND_FILE = "o95.wav";
 constexpr const wchar_t* DEFAULT_SYNC_SOUND_FILE = L"C:\\Windows\\Media\\Windows Unlock.wav";
 
 // -----------------------------

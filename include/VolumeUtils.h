@@ -1,5 +1,4 @@
-#ifndef VOLUMEUTILS_H
-#define VOLUMEUTILS_H
+#pragma once
 
 #include <algorithm>  // For std::clamp
 #include <cmath>
@@ -35,4 +34,13 @@ inline bool IsFloatEqual(float a, float b, float epsilon = 1.0f) { // Adjusted e
 
 }  // namespace VolumeUtils
 
-#endif  // VOLUMEUTILS_H
+inline std::wstring ConvertToWString(const char* str) {
+    if (!str) return L"";
+
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, str, -1, nullptr, 0);
+    std::wstring wstr(size_needed - 1, L'\0');  // Allocate without the null terminator
+    MultiByteToWideChar(CP_UTF8, 0, str, -1, &wstr[0], size_needed);
+
+    return wstr;
+}
+
