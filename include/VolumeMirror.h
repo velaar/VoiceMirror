@@ -1,75 +1,65 @@
+// VolumeMirror.h
 #pragma once
 
-#include <chrono>
+#include <atomic>
 #include <functional>
 #include <mutex>
-#include <optional>
 #include <thread>
 
-
-#include "Defconf.h" 
+#include "Defconf.h"
 #include "VoicemeeterManager.h"
-#include "VolumeUtils.h"
 #include "WindowsManager.h"
-
-struct VolumeState {
-    float volume;
-    bool isMuted;
-
-    bool operator!=(const VolumeState& other) const {
-        return !VolumeUtils::IsFloatEqual(volume, other.volume) || isMuted != other.isMuted;
-    }
-};
 
 class VolumeMirror {
    public:
-    VolumeMirror::VolumeMirror(int channelIdx, ChannelType type, float minDbmVal,
-                               float maxDbmVal, VoicemeeterManager& manager,
-                               WindowsManager& windowsManager,
-                               bool playSound);
+    enum class Mode { Polling,
+                      Callback,
+                      Hybrid };
+
+    static VolumeMirror& Instance(int channelIdx, ChannelType type, VoicemeeterManager& manager, WindowsManager& windowsManager, Mode mode) {
+        static VolumeMirror instance(channelIdx, type, manager, windowsManager, mode);
+        return instance;
+    }
     ~VolumeMirror();
+
+    VolumeMirror(const VolumeMirror&) = delete;
+    VolumeMirror& operator=(const VolumeMirror&) = delete;
 
     void Start();
     void Stop();
-    void SetPollingMode(bool enabled, int interval);
-
-    bool GetVoicemeeterVolume(float& volumePercent, bool& isMuted);
-    void UpdateVoicemeeterVolume(float volumePercent, bool isMuted);
-    void UpdateWindowsVolume(float volumePercent, bool isMuted);
 
    private:
+    VolumeMirror(int channelIdx, ChannelType type, VoicemeeterManager& manager, WindowsManager& windowsManager, Mode mode);
     void OnWindowsVolumeChange(float newVolume, bool isMuted);
-    void MonitorVoicemeeter();
+    void MonitorVolumes();
 
     int channelIndex;
     ChannelType channelType;
-    float minDbm;
-    float maxDbm;
 
     VoicemeeterManager& vmManager;
     WindowsManager& windowsManager;
 
-    VolumeState lastWindowsState;
-    VolumeState lastVmState;
-    float lastVmVolume;
+    Mode mode;
 
-    std::mutex controlMutex;
-    std::mutex vmMutex;
+    std::atomic<bool> running;
+    int pollingInterval;
 
     std::thread monitorThread;
-    std::atomic<bool> running;
 
-    bool lastWindowsMute;
-    bool ignoreWindowsChange;
-    bool ignoreVoicemeeterChange;
-    bool playSoundOnSync;
-    float lastWindowsVolume;
+    std::mutex controlMutex;
 
-    bool pollingEnabled;
-    int pollingInterval;
-    UpdateSource lastUpdateSource;
-
-    std::atomic<bool> isInitialSync;
-    CallbackID windowsVolumeCallbackID;
     std::function<void(float, bool)> windowsVolumeCallback;
+    unsigned int windowsVolumeCallbackID;
+
+    float lastVmVolume;
+    bool lastVmMute;
+    float lastWinVolume;
+    bool lastWinMute;
+
+    bool updatingVoicemeeter;
+    bool updatingWindows;
+
+    float pendingVmVolume;
+    bool pendingVmMute;
+    bool vmChangePending;
 };

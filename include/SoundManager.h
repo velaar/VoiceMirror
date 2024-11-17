@@ -1,16 +1,18 @@
 // SoundManager.h
 #pragma once
 
+#include <windows.h>
+
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <thread>
-#include <mutex>
 #include <vector>
-#include <atomic>
-#include <windows.h>
+
 #include "Logger.h"
 
 class SoundManager {
-public:
+   public:
     // Singleton access
     static SoundManager& Instance();
 
@@ -29,8 +31,8 @@ public:
     // Destructor
     ~SoundManager();
 
-private:
-    SoundManager() = default; // Private constructor for singleton
+   private:
+    SoundManager() = default;  // Private constructor for singleton
 
     // Helper method to play sound
     bool PlaySoundInternal(const std::wstring& soundFilePath, uint16_t delayMs, bool playSync);
@@ -47,5 +49,4 @@ private:
     // Stored sound paths
     std::wstring startupSoundPath_;
     std::wstring syncSoundPath_;
-
 };

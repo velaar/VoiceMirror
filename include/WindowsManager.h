@@ -1,111 +1,108 @@
+// WindowsManager.h
 #pragma once
 
 #include <audiopolicy.h>
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
-#include <mmsystem.h>
+#include <propvarutil.h>
 #include <windows.h>
 #include <wrl/client.h>
 
-#include <array>
 #include <atomic>
+#include <cmath>
 #include <functional>
+#include <map>
 #include <mutex>
-#include <optional>
 #include <string>
-#include <thread>
-#include <vector>
 
-// Project headers
 #include "Defconf.h"
 #include "Logger.h"
-#include "SoundManager.h"
 #include "VolumeUtils.h"
 
-using Microsoft::WRL::ComPtr;
 using CallbackID = unsigned int;
 
 class WindowsManager : public IAudioEndpointVolumeCallback, public IMMNotificationClient {
-   public:
+public:
+    // Constructor and Destructor
     WindowsManager(const Config& config);
     ~WindowsManager();
-    // Add near the top with other using statements
-    using DeviceCallback = std::function<void()>;
-    std::function<void()> onDevicePluggedIn;
-    std::function<void()> onDeviceUnplugged;
-    // Add to private members
-    DeviceCallback onDevicePluggedIn_;
-    DeviceCallback onDeviceUnplugged_;
-    void CheckDevice(LPCWSTR deviceId, bool isAdded);
 
-    // Add to public members
-    void SetDevicePluggedInCallback(DeviceCallback callback);
-    void SetDeviceUnpluggedCallback(DeviceCallback callback);
+    // Volume Control Methods
     bool SetVolume(float volumePercent);
     bool SetMute(bool mute);
     float GetVolume() const;
     bool GetMute() const;
 
+    // Callback Registration
     CallbackID RegisterVolumeChangeCallback(std::function<void(float, bool)> callback);
-    bool UnregisterVolumeChangeCallback(CallbackID id);
-    void SetRestartAudioEngineCallback(std::function<void()> callback);
-    void ListMonitorableDevices();
-    void HandleDevicePluggedIn();
-    void HandleDeviceUnplugged();
+    bool UnregisterVolumeChangeCallback(CallbackID callbackID);
 
-   private:
-    Config config_;
-    unsigned int hotkeyModifiers_;
-    unsigned int hotkeyVK_;
-    std::string syncSoundFilePath_;
-    bool comInitialized_;
-    HWND hwndHotkeyWindow_;
+    // Device Enumeration
+    void ListMonitorableDevices();  // Newly added method
 
-    ComPtr<IMMDeviceEnumerator> deviceEnumerator_;
-    ComPtr<IMMDevice> speakers_;
-    ComPtr<IAudioEndpointVolume> endpointVolume_;
+    // IUnknown Methods
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppvInterface) override;
+    STDMETHODIMP_(ULONG) AddRef() override;
+    STDMETHODIMP_(ULONG) Release() override;
 
-    mutable std::mutex soundMutex_;
-    mutable std::mutex callbackMutex_;
-    mutable std::mutex comInitializedMutex_;
-    std::atomic<ULONG> refCount_{1};
+    // IAudioEndpointVolumeCallback
+    STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
 
-    std::array<std::function<void(float, bool)>, MAX_CALLBACKS> callbacks_{};
-    std::array<std::optional<CallbackID>, MAX_CALLBACKS> callbackIDs_{};
-    CallbackID nextCallbackID_ = 1;
+    // IMMNotificationClient Methods
+    STDMETHODIMP OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) override;
+    STDMETHODIMP OnDeviceAdded(LPCWSTR pwstrDeviceId) override;
+    STDMETHODIMP OnDeviceRemoved(LPCWSTR pwstrDeviceId) override;
+    STDMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId) override;
+    STDMETHODIMP OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) override;
 
-    std::function<void()> restartAudioEngineCallback_;
-    mutable std::mutex restartCallbackMutex_;
+    // Device Event Callbacks
+    std::function<void()> onDevicePluggedIn;
+    std::function<void()> onDeviceUnplugged;
 
+private:
+    // COM Initialization and Interfaces
     bool InitializeCOM();
     void UninitializeCOM();
     bool InitializeCOMInterfaces();
     void Cleanup();
     void ReinitializeCOMInterfaces();
 
+    // COM Interfaces
+    Microsoft::WRL::ComPtr<IMMDeviceEnumerator> deviceEnumerator_;
+    Microsoft::WRL::ComPtr<IMMDevice> speakers_;
+    Microsoft::WRL::ComPtr<IAudioEndpointVolume> endpointVolume_;
+
+    // Reference Counting for COM
+    std::atomic<ULONG> refCount_{1};
+
+    // Configuration and State
+    Config config_;
+    float previousVolume_ = -1.0f;
+    bool previousMute_ = false;
+
+    // Mutex for Sound Operations
+    mutable std::mutex soundMutex_;
+
+    // Hotkey Handling Members
     bool InitializeHotkey();
     void CleanupHotkey();
-    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
     void WindowProcCallback();
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+    HWND hwndHotkeyWindow_;
+    uint16_t hotkeyModifiers_;
+    uint8_t hotkeyVK_;
 
-    void PlaySoundFromFile(const std::wstring& soundFilePath, uint16_t delayMs, bool playSync);
+    // COM Initialization State
+    bool comInitialized_;
+    std::mutex comInitializedMutex_;
 
-    std::string WideStringToUTF8(const std::wstring& wideStr);
-    std::wstring UTF8ToWideString(const std::string& utf8Str);
+    // Callback Management
+    std::mutex callbackMutex_;
+    std::map<CallbackID, std::function<void(float, bool)>> volumeChangeCallbacks_;
+    CallbackID nextCallbackID_ = 1;
 
-    STDMETHODIMP QueryInterface(REFIID riid, void** ppvInterface) override;
-    STDMETHODIMP_(ULONG)
-    AddRef() override;
-    STDMETHODIMP_(ULONG)
-    Release() override;
-
-    float previousVolume = -1.0f;
-    bool previousMute = false;
-    
-    STDMETHODIMP OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) override;
-    STDMETHODIMP OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) override;
-    STDMETHODIMP OnDeviceAdded(LPCWSTR pwstrDeviceId) override;
-    STDMETHODIMP OnDeviceRemoved(LPCWSTR pwstrDeviceId) override;
-    STDMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId) override;
-    STDMETHODIMP OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) override;
+    // Constants for Device Enumeration Formatting
+    static constexpr size_t INDEX_WIDTH = 7;
+    static constexpr size_t NAME_WIDTH = 22;
+    static constexpr size_t TRUNCATE_LENGTH = 19;
 };

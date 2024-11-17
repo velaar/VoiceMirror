@@ -1,31 +1,22 @@
+// WindowsManager.cpp
 #include "WindowsManager.h"
 
-#include <audiopolicy.h>
-#include <endpointvolume.h>
 #include <functiondiscoverykeys_devpkey.h>
-#include <mmdeviceapi.h>
-#include <mmsystem.h>  // For PlaySoundW
-#include <propvarutil.h>
-#include <windows.h>
-#include <wrl/client.h>
 
-#include <algorithm>
-#include <chrono>
-#include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
-#include <thread>
-#include <vector>
 
-#include "Defconf.h"
-#include "Logger.h"
-#include "VolumeUtils.h"  // Assumed utility for volume conversions
+#include "SoundManager.h"
+#include "VolumeUtils.h"
+
+using Microsoft::WRL::ComPtr;
 
 // Constructor
 WindowsManager::WindowsManager(const Config& config)
     : config_(config),
       hotkeyModifiers_(config.hotkeyModifiers.value),
       hotkeyVK_(config.hotkeyVK.value),
-      syncSoundFilePath_(config.syncSoundFilePath.value ? WideStringToUTF8(config.syncSoundFilePath.value) : WideStringToUTF8(DEFAULT_SYNC_SOUND_FILE)),
       comInitialized_(false),
       hwndHotkeyWindow_(nullptr) {
     LOG_DEBUG("[WindowsManager::WindowsManager] Initializing WindowsManager with config values.");
@@ -52,6 +43,7 @@ WindowsManager::WindowsManager(const Config& config)
         throw;
     }
 }
+
 // Destructor
 WindowsManager::~WindowsManager() {
     LOG_DEBUG("[WindowsManager::~WindowsManager] Cleaning up WindowsManager resources.");
@@ -132,7 +124,7 @@ void WindowsManager::ReinitializeCOMInterfaces() {
         throw std::runtime_error("Failed to re-register volume change notification");
 }
 
-// Set Volume
+// Volume Control Methods
 bool WindowsManager::SetVolume(float volumePercent) {
     if (volumePercent < 0.0f || volumePercent > 100.0f) {
         LOG_WARNING("[WindowsManager::SetVolume] Invalid volume percentage: " + std::to_string(volumePercent));
@@ -156,7 +148,6 @@ bool WindowsManager::SetVolume(float volumePercent) {
     return SUCCEEDED(hr);
 }
 
-// Set Mute
 bool WindowsManager::SetMute(bool mute) {
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
@@ -174,7 +165,6 @@ bool WindowsManager::SetMute(bool mute) {
     return SUCCEEDED(hr);
 }
 
-// Get Volume
 float WindowsManager::GetVolume() const {
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
@@ -188,8 +178,6 @@ float WindowsManager::GetVolume() const {
     return SUCCEEDED(hr) ? VolumeUtils::ScalarToPercent(currentVolume) : -1.0f;
 }
 
-
-// Get Mute
 bool WindowsManager::GetMute() const {
     std::lock_guard<std::mutex> lock(soundMutex_);
     if (!endpointVolume_) {
@@ -201,42 +189,135 @@ bool WindowsManager::GetMute() const {
     return SUCCEEDED(hr) ? (muted != FALSE) : false;
 }
 
-// Register Callback
+// Callback Registration
 CallbackID WindowsManager::RegisterVolumeChangeCallback(std::function<void(float, bool)> callback) {
     std::lock_guard<std::mutex> lock(callbackMutex_);
-    for (size_t i = 0; i < MAX_CALLBACKS; ++i) {
-        if (!callbackIDs_[i].has_value()) {
-            CallbackID id = nextCallbackID_++;
-            callbacks_[i] = std::move(callback);
-            callbackIDs_[i] = id;
-
-            LOG_DEBUG("[WindowsManager::RegisterVolumeChangeCallback] Registered callback ID: " + std::to_string(id));
-            return id;
-        }
-    }
-    LOG_ERROR("[WindowsManager::RegisterVolumeChangeCallback] Maximum number of callbacks reached.");
-    throw std::runtime_error("Maximum number of callbacks reached.");
+    CallbackID id = nextCallbackID_++;
+    volumeChangeCallbacks_[id] = std::move(callback);
+    return id;
 }
 
-// Unregister Callback
-bool WindowsManager::UnregisterVolumeChangeCallback(CallbackID id) {
-    std::lock_guard<std::mutex> lock(callbackMutex_);
-    for (size_t i = 0; i < MAX_CALLBACKS; ++i) {
-        if (callbackIDs_[i].has_value() && callbackIDs_[i].value() == id) {
-            callbacks_[i] = nullptr;
-            callbackIDs_[i].reset();
-            LOG_DEBUG("[WindowsManager::UnregisterVolumeChangeCallback] Unregistered callback ID: " + std::to_string(id));
-            return true;
+// IAudioEndpointVolumeCallback Implementation
+STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
+    if (!pNotify) {
+        LOG_ERROR("[WindowsManager::OnNotify] Received null notification data.");
+        return E_POINTER;
+    }
+
+    float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
+    bool newMute = (pNotify->bMuted != FALSE);
+
+    LOG_DEBUG("[WindowsManager::OnNotify] Notification received. Volume: " + std::to_string(newVolume) + "%, Mute: " + (newMute ? "Muted" : "Unmuted"));
+
+    if (std::abs(newVolume - previousVolume_) < 1.0f && newMute == previousMute_) {
+        LOG_DEBUG("[WindowsManager::OnNotify] Change is below threshold, skipping update.");
+        return S_OK;
+    }
+
+    previousVolume_ = newVolume;
+    previousMute_ = newMute;
+
+    {
+        std::lock_guard<std::mutex> lock(callbackMutex_);
+        for (const auto& [id, callback] : volumeChangeCallbacks_) {
+            callback(newVolume, newMute);
         }
     }
-    LOG_WARNING("[WindowsManager::UnregisterVolumeChangeCallback] Failed to find callback ID: " + std::to_string(id));
-    return false;
+
+    LOG_INFO("[WindowsManager::OnNotify] Volume changed to " + std::to_string(newVolume) + "%, Muted: " + (newMute ? "Yes" : "No"));
+
+    return S_OK;
 }
 
-// Set Restart Audio Engine Callback
-void WindowsManager::SetRestartAudioEngineCallback(std::function<void()> callback) {
-    std::lock_guard<std::mutex> lock(restartCallbackMutex_);
-    restartAudioEngineCallback_ = std::move(callback);
+// IUnknown Methods
+STDMETHODIMP WindowsManager::QueryInterface(REFIID riid, void** ppvInterface) {
+    if (!ppvInterface) return E_POINTER;
+    if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback))
+        *ppvInterface = static_cast<IAudioEndpointVolumeCallback*>(this);
+    else if (riid == __uuidof(IMMNotificationClient))
+        *ppvInterface = static_cast<IMMNotificationClient*>(this);
+    else {
+        *ppvInterface = nullptr;
+        return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+}
+
+STDMETHODIMP_(ULONG)
+WindowsManager::AddRef() {
+    return refCount_.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+STDMETHODIMP_(ULONG)
+WindowsManager::Release() {
+    ULONG ulRef = refCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
+    if (ulRef == 0)
+        delete this;
+    return ulRef;
+}
+
+STDMETHODIMP WindowsManager::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) {
+    std::wstring wsDeviceId(pwstrDeviceId);
+    std::string deviceId = VolumeUtils::ConvertWStringToString(wsDeviceId);
+    LOG_INFO("[WindowsManager::OnDeviceStateChanged] Device ID: " + deviceId + ", New State: " + std::to_string(dwNewState) + ".");
+
+    switch (dwNewState) {
+        case DEVICE_STATE_ACTIVE:
+            LOG_INFO("[WindowsManager::OnDeviceStateChanged] Device activated: " + deviceId);
+            if (onDevicePluggedIn) onDevicePluggedIn();
+            break;
+
+        case DEVICE_STATE_DISABLED:
+        case DEVICE_STATE_UNPLUGGED:
+            LOG_INFO("[WindowsManager::OnDeviceStateChanged] Device deactivated: " + deviceId);
+            if (onDeviceUnplugged) onDeviceUnplugged();
+            break;
+
+        case DEVICE_STATE_NOTPRESENT:
+            LOG_INFO("[WindowsManager::OnDeviceStateChanged] Device not present: " + deviceId);
+            if (onDeviceUnplugged) onDeviceUnplugged(); // Assuming you have such a callback
+            break;
+
+        default:
+            LOG_DEBUG("[WindowsManager::OnDeviceStateChanged] Device state changed to an unhandled state.");
+            break;
+    }
+    return S_OK;
+}
+
+STDMETHODIMP WindowsManager::OnDeviceAdded(LPCWSTR pwstrDeviceId) {
+    std::wstring wsDeviceId(pwstrDeviceId);
+    std::string deviceId = VolumeUtils::ConvertWStringToString(wsDeviceId);
+    LOG_INFO("[WindowsManager::OnDeviceAdded] Device added: " + deviceId + ".");
+    // Handle device addition if needed
+    return S_OK;
+}
+
+STDMETHODIMP WindowsManager::OnDeviceRemoved(LPCWSTR pwstrDeviceId) {
+    std::wstring wsDeviceId(pwstrDeviceId);
+    std::string deviceId = VolumeUtils::ConvertWStringToString(wsDeviceId);
+    LOG_INFO("[WindowsManager::OnDeviceRemoved] Device removed: " + deviceId + ".");
+    // Handle device removal if needed
+    return S_OK;
+}
+
+STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId) {
+    std::wstring wsDeviceId(pwstrDefaultDeviceId);
+    std::string deviceId = VolumeUtils::ConvertWStringToString(wsDeviceId);
+    LOG_INFO("[WindowsManager::OnDefaultDeviceChanged] Default device changed. Flow: " + std::to_string(flow) +
+             ", Role: " + std::to_string(role) + ", Device ID: " + deviceId + ".");
+    // Handle default device change if needed
+    return S_OK;
+}
+
+STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) {
+    std::wstring wsDeviceId(pwstrDeviceId);
+    std::string deviceId = VolumeUtils::ConvertWStringToString(wsDeviceId);
+    LOG_INFO("[WindowsManager::OnPropertyValueChanged] Device ID: " + deviceId + ", Property Key: {" +
+             std::to_string(key.fmtid.Data1) + ", " + std::to_string(key.pid) + "}.");
+    // Handle property value change if needed
+    return S_OK;
 }
 
 // Initialize Hotkey
@@ -269,6 +350,7 @@ bool WindowsManager::InitializeHotkey() {
         return false;
     }
 
+    LOG_DEBUG("[WindowsManager::InitializeHotkey] Hotkey registered successfully.");
     return true;
 }
 
@@ -279,6 +361,7 @@ void WindowsManager::CleanupHotkey() {
         UnregisterHotKey(hwndHotkeyWindow_, 1);
         DestroyWindow(hwndHotkeyWindow_);
         hwndHotkeyWindow_ = nullptr;
+        LOG_DEBUG("[WindowsManager::CleanupHotkey] Hotkey unregistered and window destroyed.");
     }
 }
 
@@ -293,179 +376,8 @@ LRESULT CALLBACK WindowsManager::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam,
 }
 
 void WindowsManager::WindowProcCallback() {
-    std::function<void()> callbackCopy;
-    {
-        std::lock_guard<std::mutex> lock(restartCallbackMutex_);
-        callbackCopy = restartAudioEngineCallback_;
-    }
-    if (callbackCopy)
-        callbackCopy();
-}
-
-// IUnknown Methods
-STDMETHODIMP WindowsManager::QueryInterface(REFIID riid, void** ppvInterface) {
-    if (!ppvInterface) return E_POINTER;
-    if (riid == __uuidof(IUnknown) || riid == __uuidof(IAudioEndpointVolumeCallback))
-        *ppvInterface = static_cast<IAudioEndpointVolumeCallback*>(this);
-    else if (riid == __uuidof(IMMNotificationClient))
-        *ppvInterface = static_cast<IMMNotificationClient*>(this);
-    else {
-        *ppvInterface = nullptr;
-        return E_NOINTERFACE;
-    }
-    AddRef();
-    return S_OK;
-}
-
-STDMETHODIMP_(ULONG)
-WindowsManager::AddRef() {
-    return refCount_.fetch_add(1, std::memory_order_relaxed) + 1;
-}
-
-STDMETHODIMP_(ULONG)
-WindowsManager::Release() {
-    ULONG ulRef = refCount_.fetch_sub(1, std::memory_order_relaxed) - 1;
-    if (ulRef == 0)
-        delete this;
-    return ulRef;
-}
-
-// OnNotify Callback
-STDMETHODIMP WindowsManager::OnNotify(PAUDIO_VOLUME_NOTIFICATION_DATA pNotify) {
-    if (!pNotify) {
-        LOG_ERROR("[WindowsManager::OnNotify] Received null notification data.");
-        return E_POINTER;
-    }
-
-    float newVolume = VolumeUtils::ScalarToPercent(pNotify->fMasterVolume);
-    bool newMute = (pNotify->bMuted != FALSE);
-
-    LOG_DEBUG("[WindowsManager::OnNotify] Notification received. Volume: " + std::to_string(newVolume) + "%, Mute: " + (newMute ? "Muted" : "Unmuted"));
-
-    if (std::abs(newVolume - previousVolume) < 1.0f && newMute == previousMute) {
-        LOG_DEBUG("[WindowsManager::OnNotify] Change is below threshold, skipping update.");
-        return S_OK;
-    }
-
-    previousVolume = newVolume;
-    previousMute = newMute;
-
-    for (const auto& callback : callbacks_) {
-        if (callback) {
-            LOG_DEBUG("[WindowsManager::OnNotify] Executing registered volume change callback with Volume: " + std::to_string(newVolume) + "%, Mute: " + (newMute ? "Muted" : "Unmuted"));
-            callback(newVolume, newMute);
-        }
-    }
-
-    return S_OK;
-}
-
-// IMMNotificationClient Methods
-STDMETHODIMP WindowsManager::OnDeviceStateChanged(LPCWSTR pwstrDeviceId, DWORD dwNewState) {
-    std::wstring wsDeviceId(pwstrDeviceId);
-    std::string deviceId = WideStringToUTF8(wsDeviceId);
-    LOG_INFO("[WindowsManager::OnDeviceStateChanged] Device ID: " + deviceId + ", New State: " + std::to_string(dwNewState) + ".");
-
-    if (dwNewState == DEVICE_STATE_ACTIVE) {
-        CheckDevice(pwstrDeviceId, true);
-    } else if (dwNewState == DEVICE_STATE_DISABLED || dwNewState == DEVICE_STATE_UNPLUGGED) {
-        CheckDevice(pwstrDeviceId, false);
-    } else {
-        LOG_DEBUG("[WindowsManager::OnDeviceStateChanged] Device state changed to an unhandled state.");
-    }
-    return S_OK;
-}
-
-// Handle Device Plugged In
-void WindowsManager::HandleDevicePluggedIn() {
-    LOG_DEBUG("[WindowsManager::HandleDevicePluggedIn] Handling device plugged in event.");
-    if (onDevicePluggedIn) {
-        onDevicePluggedIn();
-        LOG_INFO("[WindowsManager::HandleDevicePluggedIn] Device plugged in event handled.");
-    } else {
-        LOG_WARNING("[WindowsManager::HandleDevicePluggedIn] onDevicePluggedIn callback is not set.");
-    }
-}
-
-// Handle Device Unplugged
-void WindowsManager::HandleDeviceUnplugged() {
-    LOG_DEBUG("[WindowsManager::HandleDeviceUnplugged] Handling device unplugged event.");
-    if (onDeviceUnplugged) {
-        onDeviceUnplugged();
-        LOG_INFO("[WindowsManager::HandleDeviceUnplugged] Device unplugged event handled.");
-    } else {
-        LOG_WARNING("[WindowsManager::HandleDeviceUnplugged] onDeviceUnplugged callback is not set.");
-    }
-}
-
-STDMETHODIMP WindowsManager::OnDeviceAdded(LPCWSTR pwstrDeviceId) {
-    std::wstring wsDeviceId(pwstrDeviceId);
-    std::string deviceId = WideStringToUTF8(wsDeviceId);
-    LOG_INFO("[WindowsManager::OnDeviceAdded] Device added: " + deviceId + ".");
-    CheckDevice(pwstrDeviceId, true);
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnDeviceRemoved(LPCWSTR pwstrDeviceId) {
-    std::wstring wsDeviceId(pwstrDeviceId);
-    std::string deviceId = WideStringToUTF8(wsDeviceId);
-    LOG_INFO("[WindowsManager::OnDeviceRemoved] Device removed: " + deviceId + ".");
-    CheckDevice(pwstrDeviceId, false);
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR pwstrDefaultDeviceId) {
-    std::wstring wsDeviceId(pwstrDefaultDeviceId);
-    std::string deviceId = WideStringToUTF8(wsDeviceId);
-    LOG_INFO("[WindowsManager::OnDefaultDeviceChanged] Default device changed. Flow: " + std::to_string(flow) +
-             ", Role: " + std::to_string(role) + ", Device ID: " + deviceId + ".");
-    // Handle default device change if necessary
-    return S_OK;
-}
-
-STDMETHODIMP WindowsManager::OnPropertyValueChanged(LPCWSTR pwstrDeviceId, const PROPERTYKEY key) {
-    std::wstring wsDeviceId(pwstrDeviceId);
-    std::string deviceId = WideStringToUTF8(wsDeviceId);
-    LOG_INFO("[WindowsManager::OnPropertyValueChanged] Device ID: " + deviceId + ", Property Key: {" +
-             std::to_string(key.fmtid.Data1) + ", " + std::to_string(key.pid) + "}.");
-    // Handle property value change if necessary
-    return S_OK;
-}
-
-// Check Device
-void WindowsManager::CheckDevice(LPCWSTR deviceId, bool isAdded) {
-    std::wstring ws(deviceId);
-    std::string deviceUUID = WideStringToUTF8(ws);
-    if (deviceUUID == config_.monitorDeviceUUID.value) {
-        if (isAdded)
-            HandleDevicePluggedIn();
-        else
-            HandleDeviceUnplugged();
-    }
-}
-
-// Play Sound
-void WindowsManager::PlaySoundFromFile(const std::wstring& soundFilePath, uint16_t delayMs, bool playSync) {
-    SoundManager::Instance().PlaySyncSound();
-}
-
-// String Conversion
-std::string WindowsManager::WideStringToUTF8(const std::wstring& wideStr) {
-    if (wideStr.empty()) return "";
-    int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), nullptr, 0, nullptr, nullptr);
-    if (sizeNeeded <= 0) return "Unknown Device";
-    std::string utf8Str(sizeNeeded, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wideStr.c_str(), static_cast<int>(wideStr.length()), &utf8Str[0], sizeNeeded, nullptr, nullptr);
-    return utf8Str;
-}
-
-std::wstring WindowsManager::UTF8ToWideString(const std::string& utf8Str) {
-    if (utf8Str.empty()) return L"";
-    int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), static_cast<int>(utf8Str.size()), nullptr, 0);
-    if (sizeNeeded <= 0) return L"Unknown Device";
-    std::wstring wideStr(sizeNeeded, 0);
-    MultiByteToWideChar(CP_UTF8, 0, utf8Str.c_str(), static_cast<int>(utf8Str.size()), &wideStr[0], sizeNeeded);
-    return wideStr;
+    LOG_INFO("[WindowsManager::WindowProcCallback] Hotkey pressed. Performing associated actions.");
+    SoundManager::Instance().PlaySyncSound();  // Play sync sound directly
 }
 
 // List Monitorable Devices
@@ -474,62 +386,111 @@ void WindowsManager::ListMonitorableDevices() {
 
     ComPtr<IMMDeviceEnumerator> enumerator;
     HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), reinterpret_cast<void**>(enumerator.GetAddressOf()));
-    if (FAILED(hr)) return;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::ListMonitorableDevices] Failed to create MMDeviceEnumerator. HRESULT: " + std::to_string(hr));
+        return;
+    }
 
     ComPtr<IMMDeviceCollection> deviceCollection;
     hr = enumerator->EnumAudioEndpoints(eAll, DEVICE_STATE_ACTIVE, &deviceCollection);
-    if (FAILED(hr)) return;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::ListMonitorableDevices] Failed to enumerate audio endpoints. HRESULT: " + std::to_string(hr));
+        return;
+    }
 
     UINT deviceCount = 0;
     hr = deviceCollection->GetCount(&deviceCount);
-    if (FAILED(hr)) return;
+    if (FAILED(hr)) {
+        LOG_ERROR("[WindowsManager::ListMonitorableDevices] Failed to get device count. HRESULT: " + std::to_string(hr));
+        return;
+    }
 
-    const std::string separator = "+---------+----------------------+";
-    LOG_INFO(separator);
-    LOG_INFO("| Index   | Device Name           |");
-    LOG_INFO(separator);
+    if (deviceCount == 0) {
+        LOG_INFO("[WindowsManager::ListMonitorableDevices] No active audio devices found.");
+        return;
+    }
+
+    constexpr size_t INDEX_WIDTH = 7;
+    constexpr size_t NAME_WIDTH = 22;
+    constexpr size_t TRUNCATE_LENGTH = 19;
+
+    // Prepare header
+    std::ostringstream header;
+    header << "+" << std::setfill('-') << std::setw(INDEX_WIDTH + 2) << "-"
+           << "+" << std::setw(NAME_WIDTH + 2) << "-" << "+";
+    LOG_INFO(header.str());
+
+    std::ostringstream title;
+    title << "| " << std::left << std::setw(INDEX_WIDTH) << "Index"
+          << " | " << std::left << std::setw(NAME_WIDTH) << "Device Name" << " |";
+    LOG_INFO(title.str());
+
+    LOG_INFO(header.str());
 
     for (UINT i = 0; i < deviceCount; ++i) {
         ComPtr<IMMDevice> device;
         hr = deviceCollection->Item(i, &device);
-        if (FAILED(hr)) continue;
-
-        ComPtr<IPropertyStore> propertyStore;
-        hr = device->OpenPropertyStore(STGM_READ, &propertyStore);
-        if (FAILED(hr)) continue;
-
-        PROPVARIANT varName;
-        PropVariantInit(&varName);
-        hr = propertyStore->GetValue(PKEY_Device_FriendlyName, &varName);
         if (FAILED(hr)) {
-            PropVariantClear(&varName);
+            LOG_WARNING("[WindowsManager::ListMonitorableDevices] Failed to get device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
             continue;
         }
 
-        std::wstring deviceNameW(varName.pwszVal);
-        std::string deviceName = WideStringToUTF8(deviceNameW);
-        PropVariantClear(&varName);
+        ComPtr<IPropertyStore> propertyStore;
+        hr = device->OpenPropertyStore(STGM_READ, &propertyStore);
+        if (FAILED(hr)) {
+            LOG_WARNING("[WindowsManager::ListMonitorableDevices] Failed to open property store for device at index " + std::to_string(i) + ". HRESULT: " + std::to_string(hr));
+            continue;
+        }
 
-        if (deviceName.length() > 22)
-            deviceName = deviceName.substr(0, 19) + "...";
+        // Wrapper to ensure PropVariant is cleared
+        struct PropVariantWrapper {
+            PROPVARIANT var;
+            PropVariantWrapper() { PropVariantInit(&var); }
+            ~PropVariantWrapper() { PropVariantClear(&var); }
+            // Disable copy
+            PropVariantWrapper(const PropVariantWrapper&) = delete;
+            PropVariantWrapper& operator=(const PropVariantWrapper&) = delete;
+            // Enable move
+            PropVariantWrapper(PropVariantWrapper&& other) noexcept {
+                var = other.var;
+                other.var.pwszVal = nullptr;
+            }
+            PropVariantWrapper& operator=(PropVariantWrapper&& other) noexcept {
+                if (this != &other) {
+                    PropVariantClear(&var);
+                    var = other.var;
+                    other.var.pwszVal = nullptr;
+                }
+                return *this;
+            }
+        } varName;
 
-        std::string indexStr = std::to_string(i);
-        while (indexStr.length() < 7)
-            indexStr = " " + indexStr;
+        hr = propertyStore->GetValue(PKEY_Device_FriendlyName, &varName.var);
+        if (FAILED(hr) || varName.var.vt != VT_LPWSTR || varName.var.pwszVal == nullptr) {
+            LOG_WARNING("[WindowsManager::ListMonitorableDevices] Device at index " + std::to_string(i) + " has invalid or missing friendly name.");
+            continue;
+        }
 
-        std::string deviceNameFormatted = deviceName;
-        while (deviceNameFormatted.length() < 22)
-            deviceNameFormatted += " ";
+        std::wstring deviceNameW(varName.var.pwszVal);
+        std::string deviceName = VolumeUtils::ConvertWStringToString(deviceNameW);
 
-        LOG_INFO("| " + indexStr + " | " + deviceNameFormatted + " |");
+        if (deviceName.length() > NAME_WIDTH) {
+            deviceName = deviceName.substr(0, TRUNCATE_LENGTH) + "...";
+        }
+
+        // Format index and device name using string streams
+        std::ostringstream row;
+        row << "| " << std::left << std::setw(INDEX_WIDTH) << i
+            << " | " << std::left << std::setw(NAME_WIDTH) << deviceName << " |";
+        LOG_INFO(row.str());
     }
 
-    LOG_INFO(separator);
-}
-void WindowsManager::SetDevicePluggedInCallback(std::function<void()> callback) {
-    onDevicePluggedIn = std::move(callback);
+    LOG_INFO(header.str());
 }
 
-void WindowsManager::SetDeviceUnpluggedCallback(std::function<void()> callback) {
-    onDeviceUnplugged = std::move(callback);
+bool WindowsManager::UnregisterVolumeChangeCallback(CallbackID callbackID) {
+    std::lock_guard<std::mutex> lock(callbackMutex_);
+    size_t erased = volumeChangeCallbacks_.erase(callbackID);
+    LOG_DEBUG("[WindowsManager::UnregisterVolumeChangeCallback] Callback ID " + std::to_string(callbackID) + " erased: " + std::to_string(erased));
+    return erased > 0;
 }
